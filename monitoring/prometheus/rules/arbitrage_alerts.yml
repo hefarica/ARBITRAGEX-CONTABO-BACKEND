@@ -1,0 +1,194 @@
+# ArbitrageX Supreme V3.0 - Prometheus Alert Rules
+# Critical monitoring rules for MEV arbitrage system
+
+groups:
+  # High Priority MEV Alerts
+  - name: arbitragex.mev.critical
+    rules:
+      # MEV Opportunity Detection Rate
+      - alert: MEVOpportunityDetectionLow
+        expr: rate(arbitragex_opportunities_detected_total[5m]) < 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: searcher
+        annotations:
+          summary: "Low MEV opportunity detection rate"
+          description: "MEV opportunity detection rate is {{ $value }} per second, below threshold of 0.1/sec"
+
+      # Arbitrage Success Rate  
+      - alert: ArbitrageSuccessRateLow
+        expr: rate(arbitragex_arbitrage_success_total[10m]) / rate(arbitragex_arbitrage_attempts_total[10m]) < 0.3
+        for: 3m
+        labels:
+          severity: critical
+          component: executor
+        annotations:
+          summary: "Low arbitrage success rate"
+          description: "Arbitrage success rate is {{ $value | humanizePercentage }}, below 30% threshold"
+
+      # Flash Loan Failures
+      - alert: FlashLoanFailureRateHigh
+        expr: rate(arbitragex_flash_loan_failures_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: flash_loans
+        annotations:
+          summary: "High flash loan failure rate"
+          description: "Flash loan failure rate is {{ $value }} per second"
+
+      # Profit Threshold Alert
+      - alert: ProfitBelowThreshold
+        expr: arbitragex_total_profit_eth < 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: profitability
+        annotations:
+          summary: "Profit below minimum threshold"
+          description: "Total profit is {{ $value }} ETH, below 0.01 ETH threshold"
+
+      # Gas Price Spike
+      - alert: GasPriceSpike
+        expr: arbitragex_current_gas_price_gwei > 150
+        for: 1m
+        labels:
+          severity: warning
+          component: gas_tracker
+        annotations:
+          summary: "High gas prices detected"
+          description: "Current gas price is {{ $value }} Gwei, above 150 Gwei threshold"
+
+  # System Performance Alerts
+  - name: arbitragex.performance
+    rules:
+      # Execution Latency
+      - alert: ExecutionLatencyHigh
+        expr: arbitragex_execution_latency_seconds > 0.2
+        for: 2m
+        labels:
+          severity: critical
+          component: executor
+        annotations:
+          summary: "High execution latency"
+          description: "Arbitrage execution latency is {{ $value }}s, above 200ms threshold"
+
+      # Memory Usage
+      - alert: HighMemoryUsage
+        expr: arbitragex_memory_usage_bytes / arbitragex_memory_limit_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+
+      # Database Connection Pool
+      - alert: DatabaseConnectionPoolLow
+        expr: arbitragex_db_connections_active / arbitragex_db_connections_max > 0.9
+        for: 3m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: "{{ $value | humanizePercentage }} of database connections in use"
+
+  # Infrastructure Alerts
+  - name: arbitragex.infrastructure
+    rules:
+      # Service Health Checks
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: "{{ $labels.job }}"
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute"
+
+      # Ethereum Node Sync Status
+      - alert: EthereumNodeNotSynced
+        expr: ethereum_blockchain_head_block - ethereum_chain_head_block > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: ethereum
+        annotations:
+          summary: "Ethereum node not synced"
+          description: "Ethereum node is {{ $value }} blocks behind the chain head"
+
+      # Redis Connection Issues
+      - alert: RedisConnectionErrors
+        expr: rate(redis_connected_clients[5m]) == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis connection issues"
+          description: "Redis has no connected clients for 2 minutes"
+
+      # Disk Space Low
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is {{ $value | humanizePercentage }} full"
+
+  # MEV Competition Alerts  
+  - name: arbitragex.competition
+    rules:
+      # Bundle Success Rate
+      - alert: BundleSuccessRateLow
+        expr: rate(arbitragex_bundles_included_total[10m]) / rate(arbitragex_bundles_submitted_total[10m]) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: relays
+        annotations:
+          summary: "Low bundle inclusion rate"
+          description: "Bundle inclusion rate is {{ $value | humanizePercentage }}, below 10%"
+
+      # MEV Competition Level
+      - alert: HighMEVCompetition
+        expr: arbitragex_mev_competition_level > 8
+        for: 2m
+        labels:
+          severity: info
+          component: competition
+        annotations:
+          summary: "High MEV competition detected"
+          description: "MEV competition level is {{ $value }}/10"
+
+  # Security Alerts
+  - name: arbitragex.security
+    rules:
+      # Unusual Transaction Volume
+      - alert: UnusualTransactionVolume
+        expr: rate(arbitragex_transactions_total[1h]) > rate(arbitragex_transactions_total[24h]) * 5
+        for: 10m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Unusual transaction volume detected"
+          description: "Transaction rate is 5x higher than 24h average"
+
+      # Failed Authentication Attempts
+      - alert: FailedAuthenticationAttempts
+        expr: rate(arbitragex_auth_failures_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High failed authentication rate"
+          description: "Failed authentication rate is {{ $value }} per second"

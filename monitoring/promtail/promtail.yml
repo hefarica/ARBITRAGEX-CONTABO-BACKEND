@@ -1,0 +1,232 @@
+# ArbitrageX Supreme V3.0 - Promtail Configuration
+# Log shipping configuration for Loki integration
+
+# Server configuration
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+# Position tracking
+positions:
+  filename: /tmp/positions.yaml
+
+# Loki client configuration
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576
+    follow_redirects: false
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+    timeout: 10s
+
+# Scrape configurations
+scrape_configs:
+  # Docker container logs
+  - job_name: containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: containerlogs
+          __path__: /var/lib/docker/containers/*/*.log
+    
+    # Pipeline stages for Docker logs
+    pipeline_stages:
+      # Parse Docker JSON log format
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            attrs:
+      
+      # Extract container information from file path
+      - regex:
+          expression: '\/var\/lib\/docker\/containers\/(?P<container_id>[a-z0-9]{12})[a-z0-9]*\/[a-z0-9]*\.log'
+          source: filename
+      
+      # Add container labels
+      - docker: {}
+      
+      # Parse log levels from application logs
+      - regex:
+          expression: '(?P<level>(DEBUG|INFO|WARN|ERROR|FATAL))'
+          source: output
+      
+      # Parse timestamps
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+      
+      # Add additional labels
+      - labels:
+          level:
+          container_id:
+
+  # ArbitrageX Searcher logs
+  - job_name: arbitragex-searcher
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: searcher
+          service: arbitragex-searcher
+          __path__: /var/log/arbitragex/searcher*.log
+    
+    pipeline_stages:
+      # Parse structured JSON logs
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            module: module
+            trace_id: trace_id
+            span_id: span_id
+      
+      # Convert log level to standard format
+      - template:
+          source: level
+          template: '{{ ToUpper .Value }}'
+      
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339
+      
+      # Add labels
+      - labels:
+          level:
+          module:
+          trace_id:
+
+  # System logs (syslog)
+  - job_name: syslog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: syslog
+          __path__: /var/log/syslog
+    
+    pipeline_stages:
+      # Parse syslog format
+      - regex:
+          expression: '(?P<timestamp>\w+\s+\d+\s+\d+:\d+:\d+)\s+(?P<hostname>\S+)\s+(?P<service>\S+)(\[(?P<pid>\d+)\])?\s*:\s*(?P<message>.*)'
+      
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: 'Jan _2 15:04:05'
+      
+      # Add labels
+      - labels:
+          hostname:
+          service:
+          pid:
+
+  # Nginx access logs
+  - job_name: nginx-access
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx-access
+          __path__: /var/log/nginx/access.log
+    
+    pipeline_stages:
+      # Parse nginx access log format
+      - regex:
+          expression: '(?P<remote_addr>\S+)\s+-\s+(?P<remote_user>\S+)\s+\[(?P<time_local>[^\]]+)\]\s+"(?P<method>\S+)\s+(?P<request_uri>\S+)\s+(?P<server_protocol>\S+)"\s+(?P<status>\d+)\s+(?P<body_bytes_sent>\d+)\s+"(?P<http_referer>[^"]*)"\s+"(?P<http_user_agent>[^"]*)"'
+      
+      # Parse timestamp
+      - timestamp:
+          source: time_local
+          format: '02/Jan/2006:15:04:05 -0700'
+      
+      # Add labels
+      - labels:
+          method:
+          status:
+          remote_addr:
+
+  # Nginx error logs
+  - job_name: nginx-error
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx-error
+          __path__: /var/log/nginx/error.log
+    
+    pipeline_stages:
+      # Parse nginx error log format
+      - regex:
+          expression: '(?P<timestamp>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(?P<level>\w+)\]\s+(?P<pid>\d+)#(?P<tid>\d+):\s+(?P<message>.*)'
+      
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: '2006/01/02 15:04:05'
+      
+      # Add labels
+      - labels:
+          level:
+          pid:
+
+  # PostgreSQL logs
+  - job_name: postgres
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: postgres
+          __path__: /var/log/postgresql/*.log
+    
+    pipeline_stages:
+      # Parse PostgreSQL log format
+      - regex:
+          expression: '(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+UTC)\s+\[(?P<pid>\d+)\]\s+(?P<level>\w+):\s+(?P<message>.*)'
+      
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05.000 UTC'
+      
+      # Add labels
+      - labels:
+          level:
+          pid:
+
+  # Application-specific error logs
+  - job_name: application-errors
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: app-errors
+          __path__: /var/log/arbitragex/errors*.log
+    
+    pipeline_stages:
+      # Parse application error logs
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            error: error
+            component: component
+            trace_id: trace_id
+      
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339
+      
+      # Add labels
+      - labels:
+          level:
+          component:
+          trace_id:

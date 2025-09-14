@@ -1,0 +1,27 @@
+[package]
+name = "relays-client"
+version = "1.0.0"
+edition = "2021"
+authors = ["ArbitrageX Team"]
+description = "ArbitrageX Supreme V3.0 - MEV Relay Client for Flashbots, Eden Network, and other relays"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+ethers = { version = "2.0", features = ["rustls", "ws"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+rust_decimal = { version = "1.33", features = ["serde-float"] }
+sha3 = "0.10"
+hex = "0.4"
+async-trait = "0.1"
+thiserror = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
