@@ -1,0 +1,175 @@
+{
+  "displayName": "ArbitrageX Execution Failure Monitor",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "trigger": {
+    "name": "webhook",
+    "displayName": "Execution Failure Webhook",
+    "type": "WEBHOOK",
+    "settings": {
+      "inputUiInfo": {},
+      "webhookPath": "/arbitragex/execution-failure"
+    }
+  },
+  "steps": {
+    "analyze_failure": {
+      "name": "analyze",
+      "displayName": "Analyze Failure Type",
+      "type": "CODE",
+      "settings": {
+        "sourceCode": {
+          "code": "def main(params):\n    failure_data = params['trigger_body']\n    \n    # Categorize failure types\n    failure_type = 'unknown'\n    severity = 'medium'\n    action_required = False\n    \n    error_msg = failure_data.get('error', '').lower()\n    \n    if 'frontrun' in error_msg or 'mev' in error_msg:\n        failure_type = 'frontrun'\n        severity = 'low'\n    elif 'gas' in error_msg or 'out of gas' in error_msg:\n        failure_type = 'gas_estimation'\n        severity = 'medium'\n        action_required = True\n    elif 'slippage' in error_msg:\n        failure_type = 'slippage'\n        severity = 'medium'\n    elif 'relay' in error_msg or 'flashbots' in error_msg:\n        failure_type = 'relay_error'\n        severity = 'high'\n        action_required = True\n    elif 'simulation' in error_msg:\n        failure_type = 'simulation_error'\n        severity = 'medium'\n    else:\n        failure_type = 'system_error'\n        severity = 'high'\n        action_required = True\n    \n    return {\n        'failure_type': failure_type,\n        'severity': severity,\n        'action_required': action_required,\n        'analysis_timestamp': params['now']\n    }",
+          "input": {
+            "trigger_body": "{{trigger.body}}",
+            "now": "{{now()}}"
+          }
+        }
+      },
+      "onSuccessAction": {
+        "name": "send_slack_notification",
+        "displayName": "Send Slack Notification",
+        "type": "PIECE",
+        "settings": {
+          "pieceName": "@activepieces/piece-slack",
+          "pieceVersion": "^0.4.0",
+          "actionName": "send_message_to_channel",
+          "input": {
+            "token": "{{connections.slack_bot.token}}",
+            "channel": "#arbitragex-alerts",
+            "text": "🚨 ArbitrageX Execution Failure",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🚨 ArbitrageX Execution Failure"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Failure Type:*\n{{steps.analyze_failure.output.failure_type}}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Severity:*\n{{steps.analyze_failure.output.severity}}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Chain:*\n{{trigger.body.chain_id}}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Strategy:*\n{{trigger.body.strategy}}"
+                  }
+                ]
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Error Details:*\n```{{trigger.body.error}}```"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Opportunity ID:*\n{{trigger.body.opportunity_id}}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Timestamp:*\n{{trigger.body.timestamp}}"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "onSuccessAction": {
+          "name": "check_action_required",
+          "displayName": "Check if Action Required",
+          "type": "BRANCH",
+          "settings": {
+            "conditions": [
+              [
+                {
+                  "firstValue": "{{steps.analyze_failure.output.action_required}}",
+                  "secondValue": true,
+                  "operator": "EQUALS"
+                }
+              ]
+            ]
+          },
+          "onSuccessAction": {
+            "name": "create_incident_ticket",
+            "displayName": "Create Incident Ticket",
+            "type": "PIECE",
+            "settings": {
+              "pieceName": "@activepieces/piece-http",
+              "pieceVersion": "^0.5.0",
+              "actionName": "send_request",
+              "input": {
+                "method": "POST",
+                "url": "http://searcher-rs:8080/api/v1/incidents",
+                "headers": {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer {{connections.arbitragex_api.api_key}}"
+                },
+                "body": {
+                  "title": "Execution Failure - {{steps.analyze_failure.output.failure_type}}",
+                  "description": "{{trigger.body.error}}",
+                  "severity": "{{steps.analyze_failure.output.severity}}",
+                  "metadata": {
+                    "opportunity_id": "{{trigger.body.opportunity_id}}",
+                    "chain_id": "{{trigger.body.chain_id}}",
+                    "strategy": "{{trigger.body.strategy}}",
+                    "failure_type": "{{steps.analyze_failure.output.failure_type}}",
+                    "timestamp": "{{trigger.body.timestamp}}"
+                  },
+                  "auto_created": true,
+                  "source": "activepieces"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "update_metrics": {
+      "name": "update_failure_metrics",
+      "displayName": "Update Failure Metrics",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-http",
+        "pieceVersion": "^0.5.0",
+        "actionName": "send_request",
+        "input": {
+          "method": "POST",
+          "url": "http://searcher-rs:8080/api/v1/metrics/failures",
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {{connections.arbitragex_api.api_key}}"
+          },
+          "body": {
+            "failure_type": "{{steps.analyze_failure.output.failure_type}}",
+            "severity": "{{steps.analyze_failure.output.severity}}",
+            "chain_id": "{{trigger.body.chain_id}}",
+            "strategy": "{{trigger.body.strategy}}",
+            "timestamp": "{{trigger.body.timestamp}}",
+            "metadata": {
+              "opportunity_id": "{{trigger.body.opportunity_id}}",
+              "error_message": "{{trigger.body.error}}"
+            }
+          }
+        }
+      }
+    }
+  }
+}

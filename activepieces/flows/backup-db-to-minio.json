@@ -1,0 +1,136 @@
+{
+  "displayName": "ArbitrageX Daily Database Backup",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "trigger": {
+    "name": "schedule",
+    "displayName": "Daily Backup Schedule",
+    "type": "SCHEDULE",
+    "settings": {
+      "cronExpression": "0 2 * * *",
+      "timezone": "UTC"
+    }
+  },
+  "steps": {
+    "create_db_backup": {
+      "name": "create_backup",
+      "displayName": "Create PostgreSQL Backup",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-postgresql",
+        "pieceVersion": "^0.2.0",
+        "actionName": "backup_database",
+        "input": {
+          "connection_string": "{{connections.arbitragex_postgres.connection_string}}",
+          "backup_name": "arbitragex_backup_{{formatDate(now(), 'YYYY-MM-DD_HH-mm-ss')}}",
+          "include_data": true,
+          "include_schema": true
+        }
+      },
+      "onSuccessAction": {
+        "name": "compress_backup",
+        "displayName": "Compress Backup File",
+        "type": "CODE",
+        "settings": {
+          "sourceCode": {
+            "code": "import gzip\nimport shutil\nimport os\n\ndef main(params):\n    backup_file = params['backup_file']\n    compressed_file = backup_file + '.gz'\n    \n    with open(backup_file, 'rb') as f_in:\n        with gzip.open(compressed_file, 'wb') as f_out:\n            shutil.copyfileobj(f_in, f_out)\n    \n    # Remove original uncompressed file\n    os.remove(backup_file)\n    \n    return {\n        'compressed_file': compressed_file,\n        'original_size': params.get('original_size', 0),\n        'compressed_size': os.path.getsize(compressed_file)\n    }",
+            "input": {
+              "backup_file": "{{steps.create_backup.output.file_path}}",
+              "original_size": "{{steps.create_backup.output.file_size}}"
+            }
+          }
+        },
+        "onSuccessAction": {
+          "name": "upload_to_storage",
+          "displayName": "Upload to MinIO Storage",
+          "type": "PIECE",
+          "settings": {
+            "pieceName": "@activepieces/piece-minio",
+            "pieceVersion": "^0.1.0",
+            "actionName": "upload_object",
+            "input": {
+              "endpoint": "{{connections.minio_storage.endpoint}}",
+              "access_key": "{{connections.minio_storage.access_key}}",
+              "secret_key": "{{connections.minio_storage.secret_key}}",
+              "bucket_name": "arbitragex-backups",
+              "object_name": "database/{{steps.compress_backup.output.compressed_file | basename}}",
+              "file_path": "{{steps.compress_backup.output.compressed_file}}"
+            }
+          },
+          "onSuccessAction": {
+            "name": "cleanup_local_backup",
+            "displayName": "Cleanup Local Backup",
+            "type": "CODE",
+            "settings": {
+              "sourceCode": {
+                "code": "import os\n\ndef main(params):\n    backup_file = params['backup_file']\n    if os.path.exists(backup_file):\n        os.remove(backup_file)\n        return {'status': 'cleaned', 'file': backup_file}\n    return {'status': 'not_found', 'file': backup_file}",
+                "input": {
+                  "backup_file": "{{steps.compress_backup.output.compressed_file}}"
+                }
+              }
+            },
+            "onSuccessAction": {
+              "name": "log_backup_success",
+              "displayName": "Log Backup Success",
+              "type": "PIECE",
+              "settings": {
+                "pieceName": "@activepieces/piece-http",
+                "pieceVersion": "^0.5.0",
+                "actionName": "send_request",
+                "input": {
+                  "method": "POST",
+                  "url": "http://searcher-rs:8080/api/v1/logs",
+                  "headers": {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer {{connections.arbitragex_api.api_key}}"
+                  },
+                  "body": {
+                    "level": "info",
+                    "message": "Database backup completed successfully",
+                    "metadata": {
+                      "backup_name": "{{steps.create_backup.output.backup_name}}",
+                      "original_size": "{{steps.compress_backup.output.original_size}}",
+                      "compressed_size": "{{steps.compress_backup.output.compressed_size}}",
+                      "storage_location": "minio://arbitragex-backups/database/{{steps.compress_backup.output.compressed_file | basename}}",
+                      "timestamp": "{{now()}}"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "onFailureAction": {
+    "name": "log_backup_failure",
+    "displayName": "Log Backup Failure",
+    "type": "PIECE",
+    "settings": {
+      "pieceName": "@activepieces/piece-http",
+      "pieceVersion": "^0.5.0",
+      "actionName": "send_request",
+      "input": {
+        "method": "POST",
+        "url": "http://searcher-rs:8080/api/v1/logs",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer {{connections.arbitragex_api.api_key}}"
+        },
+        "body": {
+          "level": "error",
+          "message": "Database backup failed",
+          "metadata": {
+            "error": "{{failure.error}}",
+            "step": "{{failure.step}}",
+            "timestamp": "{{now()}}"
+          }
+        }
+      }
+    }
+  }
+}

@@ -20,66 +20,9 @@ rule_files:
 # Scrape configurations
 scrape_configs:
   # Prometheus self-monitoring
-  - job_name: 'prometheus'
+  - job_name: 'arbitragex'
     static_configs:
       - targets: ['localhost:9090']
-
-  # Geth node metrics
-  - job_name: 'geth'
-    static_configs:
-      - targets: ['geth-node:6060']
-    metrics_path: '/debug/metrics/prometheus'
-
-  # ArbitrageX services
-  - job_name: 'selector-api'
-    static_configs:
-      - targets: ['selector-api:8080']
-    metrics_path: '/metrics'
-
-  - job_name: 'sim-ctl'
-    static_configs:
-      - targets: ['sim-ctl:8081']
-    metrics_path: '/metrics'
-
-  # PostgreSQL exporter
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres-exporter:9187']
-
-  # Redis exporter
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis-exporter:9121']
-
-  # Node exporter for host metrics
-  - job_name: 'node'
-    static_configs:
-      - targets: ['node-exporter:9100']
-
-  # Nginx exporter
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['nginx-exporter:9113']
-
-  # Docker containers
-  - job_name: 'cadvisor'
-    static_configs:
-      - targets: ['cadvisor:8080']
-
-  # Temporal metrics
-  - job_name: 'temporal'
-    static_configs:
-      - targets: ['temporal:7233']
-    metrics_path: '/metrics'
-
-  # Custom ArbitrageX metrics
-  - job_name: 'arbitragex_metrics'
-    scrape_interval: 5s
-    static_configs:
-      - targets: ['selector-api:8080']
     metrics_path: '/api/v1/metrics/custom'
     params:
       include: ['opportunities', 'executions', 'pnl']
-
-
-

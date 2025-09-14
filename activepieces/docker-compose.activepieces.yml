@@ -1,0 +1,106 @@
+# Activepieces Docker Compose for ArbitrageX Supreme V3.0
+# Automatización no-code segura y autohospedada
+
+version: '3.8'
+
+services:
+  activepieces:
+    image: activepieces/activepieces:latest
+    container_name: arbitragex-activepieces
+    restart: unless-stopped
+    environment:
+      # Core Configuration
+      - AP_ENGINE_EXECUTABLE_PATH=dist/packages/engine/main.js
+      - AP_ENVIRONMENT=prod
+      - AP_FRONTEND_URL=http://localhost:8081
+      - AP_WEBHOOK_TIMEOUT_SECONDS=30
+      
+      # Database Configuration
+      - AP_POSTGRES_DATABASE=activepieces
+      - AP_POSTGRES_HOST=postgres
+      - AP_POSTGRES_PORT=5432
+      - AP_POSTGRES_USERNAME=activepieces
+      - AP_POSTGRES_PASSWORD=activepieces_secure_2024
+      - AP_POSTGRES_USE_SSL=false
+      
+      # Redis Configuration
+      - AP_REDIS_HOST=redis
+      - AP_REDIS_PORT=6379
+      - AP_REDIS_USERNAME=
+      - AP_REDIS_PASSWORD=
+      - AP_REDIS_USE_SSL=false
+      
+      # Security Configuration
+      - AP_JWT_SECRET=arbitragex_jwt_secret_2024_very_secure_key
+      - AP_ENCRYPTION_KEY=arbitragex_encryption_key_2024_32_chars
+      - AP_WEBHOOK_SECRETS=webhook_secret_arbitragex_2024
+      
+      # Features Configuration
+      - AP_SIGN_UP_ENABLED=false
+      - AP_TELEMETRY_ENABLED=false
+      - AP_TEMPLATES_SOURCE_URL=https://cloud.activepieces.com/api/v1/flow-templates
+      
+      # ArbitrageX Specific
+      - ARBITRAGEX_API_URL=http://searcher-rs:8080
+      - ARBITRAGEX_TEMPORAL_URL=http://temporal-server:7233
+      - ARBITRAGEX_POSTGRES_URL=postgresql://arbitragex:arbitragex@postgres:5432/arbitragex
+      
+    ports:
+      - "8081:80"
+    volumes:
+      - activepieces-data:/opt/activepieces/dist/packages/server/api/src/assets
+      - ./activepieces/flows:/opt/activepieces/flows
+      - ./activepieces/pieces:/opt/activepieces/pieces
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - arbitragex-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/v1/flags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  activepieces-worker:
+    image: activepieces/activepieces:latest
+    container_name: arbitragex-activepieces-worker
+    restart: unless-stopped
+    command: ["npm", "run", "start:worker"]
+    environment:
+      # Inherit same environment as main service
+      - AP_ENGINE_EXECUTABLE_PATH=dist/packages/engine/main.js
+      - AP_ENVIRONMENT=prod
+      - AP_POSTGRES_DATABASE=activepieces
+      - AP_POSTGRES_HOST=postgres
+      - AP_POSTGRES_PORT=5432
+      - AP_POSTGRES_USERNAME=activepieces
+      - AP_POSTGRES_PASSWORD=activepieces_secure_2024
+      - AP_REDIS_HOST=redis
+      - AP_REDIS_PORT=6379
+      - AP_JWT_SECRET=arbitragex_jwt_secret_2024_very_secure_key
+      - AP_ENCRYPTION_KEY=arbitragex_encryption_key_2024_32_chars
+      
+      # Worker specific
+      - AP_WORKER_CONCURRENCY=5
+      - AP_EXECUTION_MODE=SANDBOXED
+      
+    volumes:
+      - activepieces-data:/opt/activepieces/dist/packages/server/api/src/assets
+      - ./activepieces/flows:/opt/activepieces/flows
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - postgres
+      - redis
+      - activepieces
+    networks:
+      - arbitragex-network
+
+volumes:
+  activepieces-data:
+    driver: local
+
+networks:
+  arbitragex-network:
+    external: true

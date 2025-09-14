@@ -1,0 +1,78 @@
+{
+  "displayName": "ArbitrageX High Profit Alert",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "trigger": {
+    "name": "webhook",
+    "displayName": "High Profit Webhook",
+    "type": "WEBHOOK",
+    "settings": {
+      "inputUiInfo": {},
+      "webhookPath": "/arbitragex/high-profit-alert"
+    }
+  },
+  "steps": {
+    "filter_high_profit": {
+      "name": "filter",
+      "displayName": "Filter High Profit (>$1000)",
+      "type": "BRANCH",
+      "settings": {
+        "conditions": [
+          [
+            {
+              "firstValue": "{{trigger.body.profit_usd}}",
+              "secondValue": 1000,
+              "operator": "GREATER_THAN"
+            }
+          ]
+        ]
+      },
+      "onSuccessAction": {
+        "name": "send_telegram_alert",
+        "displayName": "Send Telegram Alert",
+        "type": "PIECE",
+        "settings": {
+          "pieceName": "@activepieces/piece-telegram-bot",
+          "pieceVersion": "^0.3.0",
+          "actionName": "send_message",
+          "input": {
+            "bot_token": "{{connections.telegram_bot.bot_token}}",
+            "chat_id": "{{connections.telegram_bot.chat_id}}",
+            "text": "🚀 ArbitrageX HIGH PROFIT ALERT!\n\n💰 Profit: ${{trigger.body.profit_usd}}\n⛽ Gas Used: {{trigger.body.gas_used}} ETH\n🔗 Chain: {{trigger.body.chain_id}}\n📊 Strategy: {{trigger.body.strategy}}\n⏰ Time: {{trigger.body.timestamp}}\n\n🔍 TX Hash: {{trigger.body.tx_hash}}",
+            "parse_mode": "HTML"
+          }
+        },
+        "onSuccessAction": {
+          "name": "log_alert_sent",
+          "displayName": "Log Alert Sent",
+          "type": "PIECE",
+          "settings": {
+            "pieceName": "@activepieces/piece-http",
+            "pieceVersion": "^0.5.0",
+            "actionName": "send_request",
+            "input": {
+              "method": "POST",
+              "url": "http://searcher-rs:8080/api/v1/logs",
+              "headers": {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer {{connections.arbitragex_api.api_key}}"
+              },
+              "body": {
+                "level": "info",
+                "message": "High profit alert sent via Telegram",
+                "metadata": {
+                  "profit_usd": "{{trigger.body.profit_usd}}",
+                  "tx_hash": "{{trigger.body.tx_hash}}",
+                  "alert_type": "high_profit"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

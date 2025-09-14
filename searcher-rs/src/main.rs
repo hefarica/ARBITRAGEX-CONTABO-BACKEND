@@ -1,8 +1,5 @@
-use anyhow::Result;
-use ethers::prelude::*;
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
-use tracing::{error, info, warn};
+use web3::futures::StreamExt;
+use tokio;
 use tracing_subscriber;
 use serde_json;
 use reqwest;
@@ -358,104 +355,57 @@ async fn monitor_system_health(
     let block_monitor = tokio::spawn(monitor_blocks(
         provider.clone(),
         detector,
-        state_manager.clone(),
-    ));
-
-    // Spawn task para procesar oportunidades
-    let opportunity_processor = tokio::spawn(process_opportunities(
-        rx_opportunities,
-        pool.clone(),
-        redis_conn.clone(),
-    ));
-
-    // Esperar a que todos los tasks terminen
-    tokio::select! {
-        res = mempool_monitor => {
-            error!("Mempool monitor terminó: {:?}", res);
-        }
-        res = block_monitor => {
-            error!("Block monitor terminó: {:?}", res);
-        }
-        res = opportunity_processor => {
-            error!("Opportunity processor terminó: {:?}", res);
-        }
-    }
-
-    Ok(())
-}
-
 async fn monitor_mempool(
+    chain_id: u64,
     provider: Arc<Provider<Http>>,
-    tx: mpsc::Sender<Transaction>,
-    config: Config,
+    tx_mempool: mpsc::Sender<(u64, Transaction)>,
 ) -> Result<()> {
-    info!("🔍 Iniciando monitoreo de mempool");
-    
-    let ws_provider = Provider::<Ws>::connect(&config.ws_url).await?;
-    let mut stream = ws_provider.subscribe_pending_txs().await?;
+    info!("🔍 Starting mempool monitoring for chain {}", chain_id);
+
+    let mut stream = provider.watch_pending_transactions().await?;
 
     while let Some(tx_hash) = stream.next().await {
         if let Ok(Some(tx)) = provider.get_transaction(tx_hash).await {
-            if tx.value > U256::from(config.min_profit_wei) {
-                let _ = tx.send(tx).await;
+            // Filter for relevant transactions (DEX interactions, large values, etc.)
+            if is_relevant_transaction(&tx) {
+                if let Err(e) = tx_mempool.send((chain_id, tx)).await {
+                    warn!("Failed to send mempool transaction: {}", e);
+                    break;
+                }
             }
         }
     }
 
+    error!("Mempool monitoring stopped for chain {}", chain_id);
     Ok(())
 }
 
-async fn monitor_blocks(
-    provider: Arc<Provider<Http>>,
-    detector: OpportunityDetector,
-    state_manager: Arc<StateManager>,
-) -> Result<()> {
-    info!("📦 Iniciando monitoreo de bloques");
-    
-    let mut block_stream = provider.watch_blocks().await?;
-
-    while let Some(block_hash) = block_stream.next().await {
-        match provider.get_block_with_txs(block_hash).await {
-            Ok(Some(block)) => {
-                info!("Nuevo bloque: #{}", block.number.unwrap());
-                
-                // Actualizar state
-                state_manager.update_block_data(&block).await?;
-                
-                // Detectar oportunidades
-                detector.analyze_block(&block).await?;
-            }
-            Ok(None) => warn!("Bloque no encontrado: {:?}", block_hash),
-            Err(e) => error!("Error obteniendo bloque: {}", e),
-        }
-    }
-
-    Ok(())
-}
-
+// Process detected opportunities
 async fn process_opportunities(
-    mut rx: mpsc::Receiver<Opportunity>,
-    pool: sqlx::PgPool,
-    redis_conn: Arc<RwLock<redis::aio::Connection>>,
+    mut rx_opportunities: mpsc::Receiver<Opportunity>,
+    tx_execution: mpsc::Sender<Opportunity>,
+    state_manager: Arc<StateManager>,
+    database: Arc<Database>,
 ) -> Result<()> {
-    info!("💰 Iniciando procesador de oportunidades");
+    info!("⚙️ Starting opportunity processing pipeline");
 
-    while let Some(opportunity) = rx.recv().await {
-        info!(
-            "Oportunidad detectada: {} - Profit: {} wei",
-            opportunity.strategy_type, opportunity.expected_profit
-        );
+    while let Some(opportunity) = rx_opportunities.recv().await {
+        // Validate opportunity is still profitable
+        if let Ok(is_valid) = state_manager.validate_opportunity(&opportunity).await {
+            if is_valid {
+                // Store in database
+                if let Err(e) = database.store_opportunity(&opportunity).await {
+                    error!("Failed to store opportunity: {}", e);
+                    continue;
+                }
 
-        // Guardar en PostgreSQL
-        sqlx::query!(
-            r#"
-            INSERT INTO opportunities (chain, tokens, profit, strategy_type, created_at)
-            VALUES ($1, $2, $3, $4, $5)
-            "#,
-            opportunity.chain,
-            &opportunity.tokens,
-            opportunity.expected_profit as i64,
-            opportunity.strategy_type,
+                // Send for execution
+                if let Err(e) = tx_execution.send(opportunity).await {
+                    error!("Failed to send opportunity for execution: {}", e);
+                    break;
+                }
+            }
+        }
             opportunity.created_at
         )
         .execute(&pool)

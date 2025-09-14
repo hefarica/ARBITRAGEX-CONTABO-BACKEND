@@ -1,0 +1,69 @@
+# Temporal.io Docker Compose Override for ArbitrageX Supreme V3.0
+# Orquestador central para workflows MEV atómicos
+
+version: '3.8'
+
+services:
+  temporal-server:
+    image: temporalio/auto-setup:1.22.0
+    container_name: arbitragex-temporal-server
+    depends_on:
+      - postgres
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"   # gRPC
+      - "8233:8233"   # HTTP
+    volumes:
+      - ./temporal-server/temporal.yml:/etc/temporal/config/config_template.yaml
+      - temporal-data:/etc/temporal/config/dynamicconfig
+    networks:
+      - arbitragex-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal-server:7233", "workflow", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  temporal-ui:
+    image: temporalio/ui:2.21.3
+    container_name: arbitragex-temporal-ui
+    depends_on:
+      - temporal-server
+    environment:
+      - TEMPORAL_ADDRESS=temporal-server:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+    ports:
+      - "8080:8080"
+    networks:
+      - arbitragex-network
+    restart: unless-stopped
+
+  temporal-admin-tools:
+    image: temporalio/admin-tools:1.22.0
+    container_name: arbitragex-temporal-admin
+    depends_on:
+      - temporal-server
+    environment:
+      - TEMPORAL_CLI_ADDRESS=temporal-server:7233
+    stdin_open: true
+    tty: true
+    networks:
+      - arbitragex-network
+    profiles:
+      - admin
+
+volumes:
+  temporal-data:
+    driver: local
+
+networks:
+  arbitragex-network:
+    external: true

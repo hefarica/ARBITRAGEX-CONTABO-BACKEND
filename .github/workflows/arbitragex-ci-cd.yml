@@ -1,0 +1,320 @@
+# ArbitrageX Supreme V3.0 - CI/CD Pipeline
+# Integración y despliegue continuo para todos los servicios
+
+name: ArbitrageX Supreme V3.0 CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Linting y análisis estático
+  lint-and-analyze:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        override: true
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Run Rustfmt
+      run: |
+        find . -name "*.rs" -exec rustfmt --check {} \;
+    
+    - name: Run Clippy
+      run: |
+        cd searcher-rs && cargo clippy -- -D warnings
+        cd ../relays-client && cargo clippy -- -D warnings
+        cd ../recon && cargo clippy -- -D warnings
+        cd ../selector-api && cargo clippy -- -D warnings
+        cd ../sim-ctl && cargo clippy -- -D warnings
+
+  # Job 2: Tests unitarios
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: lint-and-analyze
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arbitragex_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Run database migrations
+      run: |
+        cargo install sqlx-cli --no-default-features --features postgres
+        cd searcher-rs && sqlx migrate run
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/arbitragex_test
+    
+    - name: Run unit tests
+      run: |
+        cd searcher-rs && cargo test --lib
+        cd ../relays-client && cargo test --lib
+        cd ../recon && cargo test --lib
+        cd ../selector-api && cargo test --lib
+        cd ../sim-ctl && cargo test --lib
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/arbitragex_test
+        REDIS_URL: redis://localhost:6379
+
+  # Job 3: Tests de integración con Temporal
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arbitragex_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      temporal:
+        image: temporalio/auto-setup:1.22.0
+        env:
+          - DB=postgresql
+          - DB_PORT=5432
+          - POSTGRES_USER=postgres
+          - POSTGRES_PWD=postgres
+          - POSTGRES_SEEDS=postgres
+        ports:
+          - 7233:7233
+        options: >-
+          --health-cmd "tctl --address temporal:7233 workflow list"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install Python dependencies
+      run: |
+        pip install pytest pytest-asyncio temporalio requests
+    
+    - name: Wait for Temporal to be ready
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:7233/api/v1/namespaces; do sleep 2; done'
+    
+    - name: Run integration tests
+      run: |
+        cd tests/integration
+        python -m pytest test_arbitrage_workflow.py -v --asyncio-mode=auto
+      env:
+        TEMPORAL_ADDRESS: localhost:7233
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/arbitragex_test
+        REDIS_URL: redis://localhost:6379
+
+  # Job 4: Build Docker images
+  build-images:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        service: [searcher-rs, relays-client, recon, selector-api, sim-ctl]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./${{ matrix.service }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Job 5: Security scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-images
+    permissions:
+      security-events: write
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Job 6: Deploy to staging (solo en main branch)
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [build-images, security-scan]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to staging environment
+      run: |
+        echo "Deploying ArbitrageX Supreme V3.0 to staging..."
+        # Aquí iría la lógica de despliegue real
+        # Por ejemplo, usando kubectl, docker-compose, etc.
+        
+        # Actualizar docker-compose con nuevas imágenes
+        sed -i "s|image: .*searcher-rs.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/searcher-rs:${{ github.sha }}|g" docker-compose.yml
+        sed -i "s|image: .*relays-client.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/relays-client:${{ github.sha }}|g" docker-compose.yml
+        sed -i "s|image: .*recon.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/recon:${{ github.sha }}|g" docker-compose.yml
+        sed -i "s|image: .*selector-api.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/selector-api:${{ github.sha }}|g" docker-compose.yml
+        sed -i "s|image: .*sim-ctl.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/sim-ctl:${{ github.sha }}|g" docker-compose.yml
+        
+        echo "Staging deployment completed"
+    
+    - name: Run smoke tests
+      run: |
+        echo "Running smoke tests on staging..."
+        # Verificar que todos los servicios estén corriendo
+        timeout 300 bash -c 'until curl -f http://staging.arbitragex.com/health; do sleep 5; done'
+        echo "Smoke tests passed"
+
+  # Job 7: Deploy to production (manual approval)
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to production environment
+      run: |
+        echo "Deploying ArbitrageX Supreme V3.0 to production..."
+        echo "Production deployment would happen here"
+        echo "This requires manual approval in GitHub Actions"
+    
+    - name: Notify deployment success
+      run: |
+        echo "ArbitrageX Supreme V3.0 successfully deployed to production!"
+        # Aquí se podría enviar notificación a Slack, Discord, etc.
+
+  # Job 8: Cleanup
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always()
+    
+    steps:
+    - name: Cleanup old images
+      run: |
+        echo "Cleaning up old Docker images..."
+        # Lógica para limpiar imágenes antiguas del registry

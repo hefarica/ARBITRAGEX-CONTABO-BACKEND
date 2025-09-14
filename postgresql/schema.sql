@@ -21,33 +21,23 @@ CREATE TYPE execution_status AS ENUM (
 );
 
 -- Create opportunities table
-CREATE TABLE IF NOT EXISTS opportunities (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    chain VARCHAR(50) NOT NULL,
-    strategy_type VARCHAR(50) NOT NULL,
-    tokens TEXT[] NOT NULL,
-    pools TEXT[] NOT NULL,
-    expected_profit BIGINT NOT NULL,
-    gas_cost BIGINT NOT NULL,
-    confidence DOUBLE PRECISION NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
-    deadline BIGINT NOT NULL,
-    status opportunity_status NOT NULL DEFAULT 'pending',
-    metadata JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE opportunities (
+    id SERIAL PRIMARY KEY,
+    chain VARCHAR(50),
+    tokens TEXT[],
+    profit_usd DECIMAL,
+    gas_cost DECIMAL,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Create executions table
-CREATE TABLE IF NOT EXISTS executions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    opportunity_id UUID NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+CREATE TABLE executions (
+    id SERIAL PRIMARY KEY,
+    opportunity_id INTEGER REFERENCES opportunities(id),
     tx_hash VARCHAR(66),
-    status execution_status NOT NULL DEFAULT 'pending',
-    actual_profit BIGINT,
-    gas_used BIGINT,
-    error_reason TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
+    success BOOLEAN,
+    profit_real DECIMAL,
+    executed_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Create pools table for caching
@@ -112,13 +102,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 -- Create indexes
-CREATE INDEX idx_opportunities_status ON opportunities(status);
-CREATE INDEX idx_opportunities_deadline ON opportunities(deadline);
-CREATE INDEX idx_opportunities_profit ON opportunities(expected_profit DESC);
-CREATE INDEX idx_opportunities_created ON opportunities(created_at DESC);
-CREATE INDEX idx_executions_opportunity ON executions(opportunity_id);
-CREATE INDEX idx_executions_status ON executions(status);
-CREATE INDEX idx_executions_created ON executions(created_at DESC);
 CREATE INDEX idx_pools_active ON pools(active);
 CREATE INDEX idx_pools_tokens ON pools(token0, token1);
 CREATE INDEX idx_gas_prices_block ON gas_prices(block_number DESC);
@@ -135,9 +118,6 @@ END;
 $$ language 'plpgsql';
 
 -- Apply trigger to tables with updated_at
-CREATE TRIGGER update_opportunities_updated_at BEFORE UPDATE
-    ON opportunities FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
 CREATE TRIGGER update_pools_updated_at BEFORE UPDATE
     ON pools FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -175,6 +155,5 @@ BEGIN
     REFRESH MATERIALIZED VIEW CONCURRENTLY daily_metrics;
 END;
 $$ LANGUAGE plpgsql;
-
 
 

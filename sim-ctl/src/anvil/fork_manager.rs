@@ -50,13 +50,8 @@ impl ForkManager {
         cmd.arg("--steps-tracing");
 
         if let Some(block) = block_number.or(self.config.fork_block_number) {
-            cmd.arg("--fork-block-number").arg(block.to_string());
-        }
-
         // Start Anvil process
-        let process = cmd
-            .spawn()
-            .map_err(|e| anyhow!("Failed to start Anvil: {}", e))?;
+        let anvil = spawn(Anvil::default()).await?;
 
         // Wait for Anvil to be ready
         let provider = self.wait_for_fork(&rpc_url).await?;
@@ -76,7 +71,7 @@ impl ForkManager {
 
         let instance = ForkInstance {
             fork: fork.clone(),
-            process,
+            anvil,
             provider,
         };
 
@@ -91,12 +86,9 @@ impl ForkManager {
             info!("Destroying fork {}", fork_id);
             
             // Kill Anvil process
-            if let Err(e) = instance.process.kill() {
+            if let Err(e) = instance.anvil.stop().await {
                 warn!("Failed to kill Anvil process: {}", e);
             }
-            
-            // Wait for process to exit
-            let _ = instance.process.wait();
             
             Ok(())
         } else {
