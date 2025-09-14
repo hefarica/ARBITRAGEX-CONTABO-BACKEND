@@ -1,0 +1,62 @@
+# Dockerfile with cron integrated for sync
+FROM rust:1.75-slim as builder
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files
+COPY recon/Cargo.toml recon/Cargo.lock ./
+
+# Create dummy src to cache dependencies
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release && rm -rf src
+
+# Copy real source code
+COPY recon/src ./src
+
+# Rebuild with real code
+RUN touch src/main.rs && cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies including cron
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy compiled binary
+COPY --from=builder /app/target/release/recon /app/recon
+
+# Copy cron configuration
+COPY recon/crontab /etc/cron.d/recon-sync
+RUN chmod 0644 /etc/cron.d/recon-sync
+RUN crontab /etc/cron.d/recon-sync
+
+# Create non-root user
+RUN useradd -m -u 1000 recon && chown -R recon:recon /app
+USER recon
+
+# Environment variables
+ENV RUST_LOG=recon=debug
+ENV SYNC_INTERVAL_MINUTES=5
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8082/health || exit 1
+
+EXPOSE 8082
+
+# Start cron and the application
+CMD ["sh", "-c", "cron && ./recon"]

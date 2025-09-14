@@ -1,0 +1,166 @@
+groups:
+  - name: arbitragex_alerts
+    interval: 30s
+    rules:
+      # Service availability
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: devops
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 1 minute."
+
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "High CPU usage on {{ $labels.job }}"
+          description: "CPU usage is above 80% (current value: {{ $value }}%)"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / 1024 / 1024 / 1024) > 3
+        for: 5m
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "High memory usage on {{ $labels.job }}"
+          description: "Memory usage is above 3GB (current value: {{ $value }}GB)"
+
+      # Database connection pool exhaustion
+      - alert: DatabaseConnectionPoolExhausted
+        expr: pg_stat_database_numbackends / pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "PostgreSQL connection pool near exhaustion"
+          description: "Connection pool usage is above 80% (current value: {{ $value }}%)"
+
+      # Redis memory usage
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Redis memory usage is high"
+          description: "Redis memory usage is above 90% (current value: {{ $value }}%)"
+
+  - name: arbitragex_business_alerts
+    interval: 30s
+    rules:
+      # Low opportunity detection rate
+      - alert: LowOpportunityRate
+        expr: rate(arbitragex_opportunities_total[5m]) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: trading
+        annotations:
+          summary: "Low opportunity detection rate"
+          description: "Less than 6 opportunities per minute detected in the last 10 minutes"
+
+      # High failure rate
+      - alert: HighExecutionFailureRate
+        expr: rate(arbitragex_executions_failed_total[5m]) / rate(arbitragex_executions_total[5m]) > 0.3
+        for: 5m
+        labels:
+          severity: critical
+          team: trading
+        annotations:
+          summary: "High execution failure rate"
+          description: "Execution failure rate is above 30% (current value: {{ $value }}%)"
+
+      # Negative P&L
+      - alert: NegativePnL
+        expr: arbitragex_pnl_total < 0
+        for: 30m
+        labels:
+          severity: critical
+          team: trading
+        annotations:
+          summary: "Negative P&L detected"
+          description: "Total P&L has been negative for 30 minutes (current value: {{ $value }} ETH)"
+
+      # Low profit margin
+      - alert: LowProfitMargin
+        expr: (arbitragex_profit_total - arbitragex_gas_cost_total) / arbitragex_profit_total < 0.2
+        for: 15m
+        labels:
+          severity: warning
+          team: trading
+        annotations:
+          summary: "Low profit margin"
+          description: "Net profit margin is below 20% (current value: {{ $value }}%)"
+
+      # Simulation service issues
+      - alert: SimulationHighLatency
+        expr: histogram_quantile(0.95, rate(sim_ctl_simulation_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High simulation latency"
+          description: "95th percentile simulation latency is above 5 seconds"
+
+      # Fork creation failures
+      - alert: ForkCreationFailures
+        expr: rate(sim_ctl_fork_creation_failures_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Fork creation failures detected"
+          description: "Fork creation failure rate is {{ $value }} per second"
+
+  - name: security_alerts
+    interval: 30s
+    rules:
+      # Suspicious API activity
+      - alert: HighAPIErrorRate
+        expr: rate(http_requests_total{status=~"4.."}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "High API error rate"
+          description: "API 4xx error rate is above 10 req/s (current value: {{ $value }})"
+
+      # Potential DDoS
+      - alert: PotentialDDoS
+        expr: rate(http_requests_total[1m]) > 1000
+        for: 2m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Potential DDoS attack"
+          description: "Request rate is above 1000 req/s for 2 minutes"
+
+      # Failed authentication attempts
+      - alert: HighFailedAuthRate
+        expr: rate(auth_failures_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "High failed authentication rate"
+          description: "Failed auth attempts above 5 per minute"
+
+
+

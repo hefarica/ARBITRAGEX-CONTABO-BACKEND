@@ -1,0 +1,36 @@
+﻿**********************
+Inicio de la transcripción de Windows PowerShell
+Hora de inicio: 20250914085016
+Nombre de usuario: DESKTOP-JI3OQ5I\Windows 10 Pro
+Usuario RunAs: DESKTOP-JI3OQ5I\Windows 10 Pro
+Nombre de la configuración: 
+Máquina: DESKTOP-JI3OQ5I (Microsoft Windows NT 10.0.19045.0)
+Aplicación host: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1 -Fix
+Id. de proceso: 104768
+PSVersion: 5.1.19041.6328
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.19041.6328
+BuildVersion: 10.0.19041.6328
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+
+>> ExecutionPolicy (bypass en el proceso)
+OK: ExecutionPolicy (bypass en el proceso)
+
+>> Desbloquear archivos descargados
+OK: Desbloquear archivos descargados
+
+>> Crear carpetas base si faltan
+OK: Crear carpetas base si faltan
+
+>> Comprobar herramientas basicas
+Found Git
+Found Node
+Found Docker
+Found docker compose (v2)
+OK: Comprobar herramientas basicas
+
+>> Docker en ejecucion
