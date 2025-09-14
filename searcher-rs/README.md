@@ -604,3 +604,4 @@ cargo bench
 ## Licencia
 
 MIT License - ver LICENSE para detalles.
+

@@ -1,0 +1,43 @@
+[package]
+name = "sim-ctl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Web3/Ethereum
+ethers = { version = "2.0", features = ["ws", "rustls"] }
+web3 = "0.19"
+
+# Foundry integration
+foundry-evm = "0.2"
+
+# HTTP server
+axum = { version = "0.7" }
+tower = { version = "0.4" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utils
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Process management
+tokio-process = "0.2"
+which = "5.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+
+
