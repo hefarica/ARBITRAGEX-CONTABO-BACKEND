@@ -3,7 +3,13 @@ name = "relays-client"
 version = "1.0.0"
 edition = "2021"
 authors = ["ArbitrageX Team"]
-description = "ArbitrageX Supreme V3.0 - MEV Relay Client for Flashbots, Eden Network, and other relays"
+description = "ArbitrageX Supreme V3.0 - MEV Relay Client for Bundle Submission"
+keywords = ["arbitrage", "mev", "relay", "flashbots"]
+categories = ["finance", "network-programming"]
+
+[[bin]]
+name = "relays-client"
+path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.35", features = ["full"] }

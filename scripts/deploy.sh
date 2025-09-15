@@ -231,29 +231,139 @@ main() {
     # Create log directory
     mkdir -p "$(dirname "$LOG_FILE")"
     
-    # Pre-deployment checks
-    check_environment
+    timeout=0
+    while [ $timeout -lt $HEALTH_CHECK_TIMEOUT ]; do
+        if curl -f "$service_url" >/dev/null 2>&1; then
+            success "$service_name is healthy"
+            return 0
+        fi
+        sleep $HEALTH_CHECK_INTERVAL
+        timeout=$((timeout + HEALTH_CHECK_INTERVAL))
+    done
     
-    # Deployment steps
-    backup_current
-    update_code
-    build_services
-    deploy_services
-    run_migrations
-    update_monitoring
+    error "$service_name health check failed after $HEALTH_CHECK_TIMEOUT seconds"
+    return 1
+}
+
+# Perform health checks
+log "Performing health checks..."
+health_checks_passed=true
+
+# API Server health check
+if ! health_check "http://localhost:8080/health" "API Server"; then
+    health_checks_passed=false
+fi
+
+# Selector API health check
+if ! health_check "http://localhost:8081/health" "Selector API"; then
+    health_checks_passed=false
+fi
+
+# Database connectivity check
+if docker-compose -f docker-compose.prod.yml exec -T postgres pg_isready -U arbitragex >/dev/null 2>&1; then
+    success "Database is healthy"
+else
+    error "Database health check failed"
+    health_checks_passed=false
+fi
+
+# Redis connectivity check
+if docker-compose -f docker-compose.prod.yml exec -T redis redis-cli ping >/dev/null 2>&1; then
+    success "Redis is healthy"
+else
+    error "Redis health check failed"
+    health_checks_passed=false
+fi
+
+# Check if all health checks passed
+if [ "$health_checks_passed" = "false" ]; then
+    if [ "$FORCE_DEPLOY" = "false" ]; then
+        error "Health checks failed. Deployment aborted."
+        rollback
+        exit 1
+    else
+        warning "Health checks failed, but continuing due to --force flag"
+    fi
+fi
+
+# Run database migrations
+log "Running database migrations..."
+if docker-compose -f docker-compose.prod.yml exec -T api-server sqlx migrate run; then
+    success "Database migrations completed"
+else
+    warning "Database migrations failed or no migrations to run"
+fi
+
+# Show deployment status
+log "Deployment status:"
+docker-compose -f docker-compose.prod.yml ps
+
+# Show resource usage
+log "Resource usage:"
+docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
+
+# Create deployment record
+deployment_record="{
+    \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+    \"environment\": \"$DEPLOYMENT_ENV\",
+    \"git_branch\": \"$GIT_BRANCH\",
+    \"git_commit\": \"$(git rev-parse HEAD)\",
+    \"image_tag\": \"$IMAGE_TAG\",
+    \"deployed_by\": \"$(whoami)\",
+    \"status\": \"success\"
+}"
+
+mkdir -p ./deployments
+echo "$deployment_record" > "./deployments/deployment_$(date +%Y%m%d_%H%M%S).json"
+
+# Success message
+echo ""
+success " ArbitrageX deployment completed successfully!"
+echo ""
+log "Deployment Information:"
+echo "  • Environment:       $DEPLOYMENT_ENV"
+echo "  • Git Branch:        $GIT_BRANCH"
+echo "  • Git Commit:        $(git rev-parse --short HEAD)"
+echo "  • Image Tag:         $IMAGE_TAG"
+echo "  • Deployed At:       $(date)"
+echo "  • Deployed By:       $(whoami)"
+echo ""
+log "Service Endpoints:"
+echo "  • API Server:        http://localhost:8080"
+echo "  • Selector API:      http://localhost:8081"
+echo "  • Health Check:      http://localhost:8080/health"
+echo "  • Metrics:           http://localhost:8080/api/v1/metrics"
+echo "  • WebSocket:         ws://localhost:8080/ws"
+echo "  • Grafana:           http://localhost:3000 (admin/admin)"
+echo "  • Prometheus:        http://localhost:9090"
+echo ""
+log "Useful Commands:"
+echo "  • View logs:         docker-compose -f docker-compose.prod.yml logs -f"
+echo "  • Stop services:     docker-compose -f docker-compose.prod.yml down"
+echo "  • Restart service:   docker-compose -f docker-compose.prod.yml restart [service]"
+echo "  • Scale service:     docker-compose -f docker-compose.prod.yml up -d --scale [service]=N"
+echo ""
+success " ArbitrageX is ready for production MEV arbitrage!"
+
+# Rollback function
+rollback() {
+    warning "Initiating rollback..."
+    docker-compose -f docker-compose.prod.yml down
     
-    # Post-deployment
-    log "Deployment completed successfully! 🎉"
-    send_notification "success" "Deployment completed successfully"
+    # Restore from backup if available
+    if [ "$BACKUP_ENABLED" = "true" ] && [ -f "./backups/$backup_file" ]; then
+        log "Restoring database from backup..."
+        docker-compose -f docker-compose.prod.yml up -d postgres
+        sleep 10
+        docker-compose -f docker-compose.prod.yml exec -T postgres psql -U arbitragex -d arbitragex_supreme < "./backups/$backup_file"
+        success "Database restored from backup"
+    fi
     
-    # Show service status
-    docker-compose -f docker/docker-compose.yml ps
+    error "Rollback completed"
 }
 
 # Error handling
 trap 'error "Deployment failed! Check logs at: $LOG_FILE"' ERR
-
-# Run main function
 main "$@"
 
 

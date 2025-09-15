@@ -11,18 +11,223 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets:
-            - alertmanager:9093
+          - alertmanager:9093
 
-# Load rules once and periodically evaluate them
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
 rule_files:
-  - "alerts.rules"
+  - "rules/arbitragex_alerts.yml"
+  - "rules/system_alerts.yml"
+  - "rules/performance_alerts.yml"
 
-# Scrape configurations
+# Scrape configuration for ArbitrageX services
 scrape_configs:
   # Prometheus self-monitoring
-  - job_name: 'arbitragex'
+  - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
-    metrics_path: '/api/v1/metrics/custom'
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  # ArbitrageX API Server
+  - job_name: 'arbitragex-api-server'
+    static_configs:
+      - targets: ['api-server:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 10s
+    honor_labels: true
     params:
-      include: ['opportunities', 'executions', 'pnl']
+      format: ['prometheus']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: api-server:8080
+
+  # ArbitrageX Searcher Service
+  - job_name: 'arbitragex-searcher'
+    static_configs:
+      - targets: ['searcher-rs:8082']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # ArbitrageX Selector API
+  - job_name: 'arbitragex-selector-api'
+    static_configs:
+      - targets: ['selector-api:8081']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # ArbitrageX Reconciliation Service
+  - job_name: 'arbitragex-recon'
+    static_configs:
+      - targets: ['recon:8083']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # ArbitrageX Relays Client
+  - job_name: 'arbitragex-relays-client'
+    static_configs:
+      - targets: ['relays-client:8084']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # ArbitrageX Simulation Control
+  - job_name: 'arbitragex-sim-ctl'
+    static_configs:
+      - targets: ['sim-ctl:8085']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # PostgreSQL Database
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    params:
+      format: ['prometheus']
+
+  # Redis Cache
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Node Exporter for system metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '(.*)'
+        target_label: instance
+        replacement: '${1}'
+      - source_labels: [__address__]
+        regex: '(.*)'
+        target_label: __address__
+        replacement: '${1}'
+
+  # cAdvisor for container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    metrics_path: '/metrics'
+    honor_labels: true
+
+  # Ethereum Node Metrics (if available)
+  - job_name: 'ethereum-node'
+    static_configs:
+      - targets: ['ethereum-node:8545']
+    metrics_path: '/debug/metrics/prometheus'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    honor_labels: true
+    scheme: 'http'
+
+  # MEV Relay Metrics
+  - job_name: 'mev-relays'
+    static_configs:
+      - targets:
+        - 'relay.flashbots.net:443'
+        - 'api.edennetwork.io:443'
+    metrics_path: '/metrics'
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    scheme: 'https'
+    honor_labels: true
+
+  # Custom Business Metrics
+  - job_name: 'arbitragex-business-metrics'
+    static_configs:
+      - targets: ['api-server:8080']
+    metrics_path: '/api/v1/metrics/prometheus'
+    scrape_interval: 10s
+    scrape_timeout: 10s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+
+  # Health Check Endpoints
+  - job_name: 'health-checks'
+    static_configs:
+      - targets:
+        - 'api-server:8080'
+        - 'searcher-rs:8082'
+        - 'selector-api:8081'
+        - 'recon:8083'
+        - 'relays-client:8084'
+        - 'sim-ctl:8085'
+    metrics_path: '/health'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    params:
+      format: ['prometheus']
+
+# Remote write configuration for long-term storage
+remote_write:
+  - url: "http://victoria-metrics:8428/api/v1/write"
+    queue_config:
+      max_samples_per_send: 10000
+      max_shards: 200
+      capacity: 20000
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'go_.*'
+        action: drop
+      - source_labels: [__name__]
+        regex: 'prometheus_.*'
+        action: drop
+
+# Remote read configuration
+remote_read:
+  - url: "http://victoria-metrics:8428/api/v1/read"
+    read_recent: true
+
+# Storage configuration
+storage:
+  tsdb:
+    retention.time: 7d
+    retention.size: 10GB
+    wal-compression: true
+    no-lockfile: false
+    allow-overlapping-blocks: false
+    min-block-duration: 2h
+    max-block-duration: 25h
+
+# Web configuration
+web:
+  console.libraries: /etc/prometheus/console_libraries
+  console.templates: /etc/prometheus/consoles
+  enable-lifecycle: true
+  enable-admin-api: true
+  page-title: "ArbitrageX Supreme V3.0 - Prometheus"
+  external-url: "http://localhost:9090"
+  route-prefix: "/"
+  max-connections: 512
+  read-timeout: 30s
+  listen-address: "0.0.0.0:9090"
+
+# Runtime configuration
+runtime:
+  gogc: 75
+  gomaxprocs: 4

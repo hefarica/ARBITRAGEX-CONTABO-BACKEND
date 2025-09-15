@@ -1,0 +1,211 @@
+# ArbitrageX Supreme V3.0 - Git Ignore Configuration
+# Comprehensive ignore patterns for Rust, Docker, and production files
+
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment and Configuration
+.env
+.env.local
+.env.production
+.env.staging
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Logs
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+dump.rdb
+*.sql.backup
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+.docker/
+
+# Build artifacts
+dist/
+build/
+out/
+*.tar.gz
+*.zip
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+.cache/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.backup
+*.bak
+*.orig
+backups/
+*.sql.gz
+
+# Secrets and keys
+secrets/
+keys/
+certificates/
+*.secret
+*_rsa
+*_rsa.pub
+*.crt
+*.csr
+
+# Monitoring and metrics data
+prometheus_data/
+grafana_data/
+alertmanager_data/
+
+# Node.js (for any frontend tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Coverage reports
+coverage/
+*.lcov
+*.gcov
+
+# Profiling
+*.prof
+*.cpu
+*.mem
+
+# Local development
+.local/
+local/
+dev/
+development/
+
+# Production deployment
+production/
+staging/
+deploy/
+releases/
+
+# Terraform (if used for infrastructure)
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+
+# Kubernetes (if used)
+*.kubeconfig
+kube-config
+
+# Analytics and tracking
+analytics/
+tracking/
+*.analytics
+
+# Large files
+*.iso
+*.dmg
+*.img
+*.bin
+
+# Compiled binaries
+arbitragex-*
+searcher-rs
+selector-api
+api-server
+recon
+relays-client
+sim-ctl
+
+# Test artifacts
+test-results/
+test-output/
+*.test
+
+# Documentation build
+docs/build/
+site/
+
+# Package managers
+Pipfile.lock
+poetry.lock
+yarn.lock
+
+# IDE specific
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+.idea/workspace.xml
+.idea/tasks.xml
+
+# Rust specific
+**/*.rs.bk
+*.pdb
+target/
+Cargo.lock
+
+# Local configuration overrides
+config.local.toml
+config.local.yaml
+config.local.json
+
+# Performance and debugging
+*.perf
+*.trace
+*.flame
+perf.data*
+
+# Blockchain specific
+keystore/
+wallet.dat
+geth/
+chaindata/
+
+# MEV specific
+bundles/
+transactions/
+mempool_data/
+
+# Simulation data
+simulation_results/
+test_data/
+mock_data/
+
+# Metrics and monitoring
+metrics/
+dashboards/local/
+alerts/local/

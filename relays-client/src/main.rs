@@ -38,64 +38,33 @@ async fn main() -> Result<()> {
 
     // Initialize Redis connection for communication with searcher
     let redis_client = redis::Client::open(
-        env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string())
-    )?;
-    let mut redis_conn = redis_client.get_tokio_connection().await?;
-    info!("🔴 Redis connection established");
-
-    // Create channels for internal communication
-    let (tx_bundles, mut rx_bundles) = mpsc::channel::<BundleSubmissionRequest>(1000);
-    let (tx_responses, mut rx_responses) = mpsc::channel::<BundleSubmissionResponse>(1000);
-
-    // Task 1: Listen for bundle submission requests from Redis
-    let redis_listener_task = {
-        let tx_bundles = tx_bundles.clone();
-        let mut redis_conn = redis_conn.clone();
-        
-        tokio::spawn(async move {
-            info!("🎧 Starting Redis listener for bundle requests");
-            
-            loop {
-                match redis_conn.blpop::<_, Vec<String>>("bundle_requests", 1).await {
-                    Ok(result) => {
-                        if result.len() >= 2 {
-                            let bundle_data = &result[1];
-                            match serde_json::from_str::<BundleSubmissionRequest>(bundle_data) {
-                                Ok(request) => {
-                                    info!("📦 Received bundle request: {}", request.bundle_id);
-                                    if let Err(e) = tx_bundles.send(request).await {
-                                        error!("Failed to forward bundle request: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    error!("Failed to parse bundle request: {}", e);
-                                }
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        error!("Redis BLPOP error: {}", e);
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                    }
-                }
-            }
-        })
     };
-
-    // Task 2: Process bundle submissions
-    let bundle_processor_task = {
-        let relay_manager = relay_manager.clone();
-        let tx_responses = tx_responses.clone();
-        
-        tokio::spawn(async move {
-            info!("⚡ Starting bundle processor");
-            
-            while let Some(request) = rx_bundles.recv().await {
-                info!("🔄 Processing bundle: {}", request.bundle_id);
-                
-                match relay_manager.submit_bundle(request.clone()).await {
-                    Ok(response) => {
-                        info!("✅ Bundle {} submitted successfully", request.bundle_id);
+    
+    // Initialize relay client
+    let client = RelayClient::new(config.clone());
+    
+    // Start background metrics worker
+    let worker_state = client.state.clone();
+    tokio::spawn(async move {
+        metrics_worker(worker_state).await;
+    });
+    
+    info!("MEV Relay Client started on port {}", config.port);
+    
+    // Example bundle submission for testing
+    let test_bundle = Bundle {
+        id: Uuid::new_v4().to_string(),
+        transactions: vec![
+            "0x02f8b20182012a8459682f008459682f0e8301388094a0b86a33e6ba3e6f1b5f6b5a5c5b5d5e5f5g5h5i5j80b844a9059cbb000000000000000000000000742d35cc6634c0532925a3b8d3ac6d9b5c5e5f5g000000000000000000000000000000000000000000000000000000000000000ac080a0".to_string(),
+        ],
+        block_number: 18500000,
+        min_timestamp: None,
+        max_timestamp: None,
+        replacement_uuid: None,
+        signing_address: None,
+        refund_percent: Some(90),
+        refund_recipient: None,
+        refund_index: None,
                         if let Err(e) = tx_responses.send(response).await {
                             error!("Failed to send response: {}", e);
                         }
