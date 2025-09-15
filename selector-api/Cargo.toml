@@ -1,41 +1,176 @@
 [package]
 name = "selector-api"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "ArbitrageX Supreme V3.0 - Advanced Opportunity Selection and Routing API"
+keywords = ["arbitrage", "mev", "defi", "api", "selection"]
+categories = ["web-programming", "api-bindings", "finance"]
+readme = "README.md"
+
+[[bin]]
+name = "selector-api"
+path = "src/main.rs"
 
 [dependencies]
-# Web framework
-axum = { version = "0.7", features = ["ws", "json", "tokio"] }
-axum-extra = { version = "0.9", features = ["typed-header"] }
-tower = { version = "0.4", features = ["full"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"] }
+# Async runtime and utilities
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
 
-# Async runtime
-tokio = { version = "1.35", features = ["full"] }
-tokio-tungstenite = "0.21"
+# Web framework and HTTP
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+hyper.workspace = true
+reqwest.workspace = true
 
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# Serialization and data formats
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
 
-# Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
-redis = { version = "0.24", features = ["tokio-comp", "json"] }
+# Database and caching
+sqlx.workspace = true
+redis.workspace = true
 
-# Utils
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-anyhow = "1.0"
-thiserror = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "serde"] }
+# Temporal.io workflow integration
+temporal-sdk.workspace = true
+temporal-sdk-core.workspace = true
 
-# Auth
+# WebSocket support
+tokio-tungstenite.workspace = true
+tungstenite.workspace = true
+
+# Cryptography and blockchain
+sha3.workspace = true
+secp256k1.workspace = true
+hex.workspace = true
+rand.workspace = true
+ethers.workspace = true
+web3.workspace = true
+
+# Numeric types for financial calculations
+rust_decimal.workspace = true
+bigdecimal.workspace = true
+num-bigint.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+eyre.workspace = true
+
+# Logging and tracing
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-opentelemetry.workspace = true
+opentelemetry.workspace = true
+opentelemetry-jaeger.workspace = true
+
+# Time and dates
+chrono.workspace = true
+time.workspace = true
+
+# Utilities and collections
+uuid.workspace = true
+url.workspace = true
+once_cell.workspace = true
+lazy_static.workspace = true
+parking_lot.workspace = true
+dashmap.workspace = true
+
+# Configuration management
+config.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+
+# Metrics and monitoring
+prometheus.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+
+# Machine Learning for opportunity scoring
+candle = { version = "0.4", features = ["cuda", "cudnn"] }
+candle-nn = "0.4"
+candle-core = "0.4"
+tch = { version = "0.13", optional = true }
+
+# Advanced data structures
+bloom = "0.3"
+lru = "0.12"
+roaring = "0.10"
+
+# Compression and encoding
+flate2 = "1.0"
+base64 = "0.21"
+
+# Rate limiting and throttling
+governor = "0.6"
+tokio-util = { version = "0.7", features = ["time"] }
+
+# JSON Web Tokens
 jsonwebtoken = "9.2"
-bcrypt = "0.15"
 
-# Validation
-validator = { version = "0.16", features = ["derive"] }
+# Environment and process management
+nix = { version = "0.27", features = ["process", "signal"] }
+
+[dev-dependencies]
+# Testing framework
+tokio-test = "0.4"
+mockall.workspace = true
+wiremock.workspace = true
+tempfile.workspace = true
+criterion.workspace = true
+
+# Property-based testing
+proptest = "1.4"
+quickcheck = "1.0"
+
+# HTTP testing
+httpmock = "0.7"
+axum-test = "14.0"
+
+# Database testing
+sqlx-test = "0.1"
+testcontainers = "0.15"
+
+[features]
+default = ["ml-scoring", "advanced-metrics", "gpu-acceleration"]
+
+# Machine learning features
+ml-scoring = ["candle", "candle-nn", "candle-core"]
+pytorch-integration = ["tch"]
+gpu-acceleration = ["candle/cuda", "candle/cudnn"]
+
+# Performance features
+advanced-metrics = ["prometheus", "metrics", "metrics-exporter-prometheus"]
+high-performance = ["parking_lot", "dashmap"]
+compression = ["flate2"]
+
+# Security features
+enhanced-security = ["jsonwebtoken", "governor"]
+rate-limiting = ["governor"]
+
+# Development features
+development = ["tokio-test", "mockall", "wiremock"]
+benchmarking = ["criterion"]
+
+[profile.dev]
+opt-level = 1
+debug = true
+split-debuginfo = "unpacked"
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+incremental = true
+codegen-units = 256
+rpath = false
 
 [profile.release]
 opt-level = 3

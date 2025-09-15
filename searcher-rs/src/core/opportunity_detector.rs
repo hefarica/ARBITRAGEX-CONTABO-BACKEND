@@ -12,6 +12,65 @@ use crate::strategies::Strategy;
 use crate::types::{MarketState, Opportunity, Config, DexPool, TokenPrice};
 use crate::core::StateManager;
 
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use anyhow::Result;
+use ethers::types::Bytes;
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Opportunity {
+    pub id: String,
+    pub opportunity_type: OpportunityType,
+    pub chain: String,
+    pub tokens: Vec<TokenInfo>,
+    pub dexes: Vec<DexInfo>,
+    pub profit_estimate_usd: f64,
+    pub gas_estimate: u64,
+    pub gas_price_gwei: u64,
+    pub confidence_score: f64,
+    pub risk_score: f64,
+    pub timestamp: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub transaction_data: Option<TransactionData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenInfo {
+    pub address: String,
+    pub symbol: String,
+    pub decimals: u8,
+    pub amount: String,
+    pub price_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DexInfo {
+    pub name: String,
+    pub router_address: String,
+    pub pool_address: String,
+    pub fee_bps: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionData {
+    pub to: String,
+    pub data: String,
+    pub value: String,
+    pub gas_limit: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OpportunityType {
+    TriangularArbitrage,
+    FlashLoanArbitrage,
+    SandwichAttack,
+    Liquidation,
+    CrossDexArbitrage,
+    StaticArbitrage,
+}
+
 pub struct OpportunityDetector {
     providers: HashMap<u64, Arc<Provider<Http>>>,
     state_manager: Arc<StateManager>,
@@ -22,6 +81,20 @@ pub struct OpportunityDetector {
     coingecko_client: reqwest::Client,
     dex_pools: Arc<RwLock<HashMap<String, DexPool>>>,
     token_prices: Arc<RwLock<HashMap<String, TokenPrice>>>,
+    min_profit_threshold_usd: f64,
+    max_gas_price_gwei: u64,
+    min_confidence_score: f64,
+    gas_price_cache: HashMap<String, u64>,
+    token_prices_cache: HashMap<String, f64>,
+    dex_configs: HashMap<String, DexConfig>,
+}
+
+#[derive(Debug, Clone)]
+struct DexConfig {
+    router_address: Address,
+    factory_address: Address,
+    fee_bps: u16,
+    supports_flash_loans: bool,
 }
 
 impl OpportunityDetector {
@@ -41,6 +114,30 @@ impl OpportunityDetector {
             .user_agent("ArbitrageX/3.0")
             .build()?;
 
+        let mut dex_configs = HashMap::new();
+        
+        // Initialize major DEX configurations
+        dex_configs.insert("uniswap_v2".to_string(), DexConfig {
+            router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().unwrap(),
+            factory_address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f".parse().unwrap(),
+            fee_bps: 30,
+            supports_flash_loans: false,
+        });
+        
+        dex_configs.insert("uniswap_v3".to_string(), DexConfig {
+            router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564".parse().unwrap(),
+            factory_address: "0x1F98431c8aD98523631AE4a59f267346ea31F984".parse().unwrap(),
+            fee_bps: 30, // Variable fees
+            supports_flash_loans: true,
+        });
+        
+        dex_configs.insert("sushiswap".to_string(), DexConfig {
+            router_address: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F".parse().unwrap(),
+            factory_address: "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac".parse().unwrap(),
+            fee_bps: 30,
+            supports_flash_loans: false,
+        });
+        
         let detector = Self {
             providers,
             state_manager,

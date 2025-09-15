@@ -2,12 +2,30 @@
 name = "searcher-rs"
 version = "0.1.0"
 edition = "2021"
+authors = ["ArbitrageX Team"]
+description = "Ultra-fast MEV opportunity detection engine"
 
 [dependencies]
-web3 = { version = "0.20", features = ["ipc"] }
+web3 = { version = "0.20", features = ["ws", "ipc", "http"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 reqwest = { version = "0.11", features = ["json"] }
+log = "0.4"
+env_logger = "0.10"
+ethers = { version = "2.0", features = ["ws", "rustls"] }
+futures = "0.3"
+thiserror = "1.0"
+anyhow = "1.0"
+tokio-tungstenite = "0.20"
+rust_decimal = { version = "1.0", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+redis = { version = "0.23", features = ["tokio-comp"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
 num-bigint = "0.4"
 rayon = "1.8"
 

@@ -1,19 +1,17 @@
 # Multi-stage build for searcher-rs
 FROM rust:1.75-slim as builder
 
-WORKDIR /app
-
-# Install system dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
-    build-essential \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files
-COPY searcher-rs/Cargo.toml searcher-rs/Cargo.lock ./
+WORKDIR /app
 
-# Create dummy src to cache dependencies
+# Copy Cargo files first for better caching
+COPY searcher-rs/Cargo.toml searcher-rs/Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release && rm -rf src
 

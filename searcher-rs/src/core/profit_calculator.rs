@@ -8,6 +8,11 @@ use crate::types::{DexPool, TokenPrice, Opportunity};
 pub struct ProfitCalculator {
     gas_price_oracle: GasPriceOracle,
     slippage_calculator: SlippageCalculator,
+    eth_price_usd: f64,
+    gas_price_cache: HashMap<String, u64>,
+    dex_fee_rates: HashMap<String, u16>,
+    flash_loan_fee_rates: HashMap<String, u16>,
+    slippage_tolerance: f64,
 }
 
 impl ProfitCalculator {
@@ -15,6 +20,11 @@ impl ProfitCalculator {
         Self {
             gas_price_oracle: GasPriceOracle::new(),
             slippage_calculator: SlippageCalculator::new(),
+            eth_price_usd: 2000.0, // Will be updated from real price feeds
+            gas_price_cache: HashMap::new(),
+            dex_fee_rates: HashMap::new(),
+            flash_loan_fee_rates: HashMap::new(),
+            slippage_tolerance: 0.005, // 0.5% default slippage tolerance
         }
     }
 

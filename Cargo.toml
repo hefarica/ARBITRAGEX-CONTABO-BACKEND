@@ -1,0 +1,153 @@
+[workspace]
+resolver = "2"
+members = [
+    "searcher-rs",
+    "selector-api",
+    "sim-ctl",
+    "recon",
+    "relays-client"
+]
+
+[workspace.package]
+version = "3.0.0"
+edition = "2021"
+authors = ["ArbitrageX Team <dev@arbitragex.dev>"]
+license = "MIT"
+repository = "https://github.com/hefarica/ARBITRAGEX-CONTABO-BACKEND"
+homepage = "https://arbitragex.dev"
+description = "ArbitrageX Supreme V3.0 - Complete MEV arbitrage detection and execution system"
+keywords = ["arbitrage", "mev", "defi", "ethereum", "rust"]
+categories = ["finance", "cryptography", "network-programming"]
+readme = "README.md"
+
+[workspace.dependencies]
+# Async runtime and utilities
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+
+# Web3 and blockchain
+ethers = { version = "2.0", features = ["ws", "rustls", "abigen"] }
+web3 = { version = "0.19", features = ["ws", "tls"] }
+alloy = { version = "0.1", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# HTTP client and server
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+axum = { version = "0.7", features = ["ws", "headers", "multipart"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["full"] }
+hyper = { version = "1.0", features = ["full"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# Temporal.io
+temporal-sdk = "0.1"
+temporal-sdk-core = "0.1"
+
+# WebSocket
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+tungstenite = "0.21"
+
+# Cryptography
+sha3 = "0.10"
+secp256k1 = { version = "0.28", features = ["recovery", "rand"] }
+hex = "0.4"
+rand = "0.8"
+
+# Numeric types
+rust_decimal = { version = "1.33", features = ["serde-with-str"] }
+bigdecimal = { version = "0.4", features = ["serde"] }
+num-bigint = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+eyre = "0.6"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.22"
+opentelemetry = "0.21"
+opentelemetry-jaeger = "0.20"
+
+# Time and dates
+chrono = { version = "0.4", features = ["serde"] }
+time = { version = "0.3", features = ["serde", "macros"] }
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+url = { version = "2.5", features = ["serde"] }
+once_cell = "1.19"
+lazy_static = "1.4"
+parking_lot = "0.12"
+dashmap = "5.5"
+
+# Configuration
+config = "0.14"
+clap = { version = "4.4", features = ["derive", "env"] }
+dotenvy = "0.15"
+
+# Metrics and monitoring
+prometheus = { version = "0.13", features = ["process"] }
+metrics = "0.22"
+metrics-exporter-prometheus = "0.13"
+
+# Testing (dev dependencies)
+mockall = "0.12"
+wiremock = "0.5"
+tempfile = "3.8"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.release]
+opt-level = 3
+debug = false
+split-debuginfo = "off"
+debug-assertions = false
+overflow-checks = false
+lto = "fat"
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+strip = "symbols"
+
+[profile.test]
+opt-level = 1
+debug = true
+split-debuginfo = "unpacked"
+debug-assertions = true
+overflow-checks = true
+incremental = true
+codegen-units = 256
+
+[profile.bench]
+opt-level = 3
+debug = false
+split-debuginfo = "off"
+debug-assertions = false
+overflow-checks = false
+lto = "fat"
+incremental = false
+codegen-units = 1
