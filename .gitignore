@@ -42,7 +42,6 @@ dump.rdb
 *.sql.backup
 
 # Docker
-.dockerignore
 docker-compose.override.yml
 .docker/
 

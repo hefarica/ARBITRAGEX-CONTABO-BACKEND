@@ -1637,65 +1637,101 @@ Sistema backend completo de arbitraje DeFi y MEV (Maximal Extractable Value) imp
 
 ---
 
-## 🚀 **INSTALACIÓN Y CONFIGURACIÓN**
+## 🚀 ArbitrageX Supreme V3.0 - Backend (Contabo VPS)
 
-### **Prerrequisitos**
+[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![Docker](https://img.shields.io/badge/Docker-20.10+-blue.svg)](https://www.docker.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-blue.svg)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-6.2+-red.svg)](https://redis.io/)
 
-- **Rust**: 1.75+ con cargo
-- **Node.js**: 20+ con npm/yarn
-- **PostgreSQL**: 15+
-- **Redis**: 7+
-- **Docker**: 24+
-- **Docker Compose**: 2.0+
+This is the **Backend repository** for ArbitrageX Supreme V3.0, a high-performance MEV (Maximal Extractable Value) arbitrage system designed for professional traders and institutions.
 
-### **Instalación Rápida**
+## 🏗️ System Architecture
+
+ArbitrageX Supreme V3.0 consists of **6 core microservices** running on Contabo VPS:
+
+```mermaid
+graph TB
+    A[Searcher-RS] --> B[Selector-API]
+    B --> C[Sim-CTL]
+    C --> D[Relays-Client]
+    E[API-Server] --> F[Recon]
+    G[PostgreSQL] --> H[Redis]
+    I[Prometheus] --> J[Grafana]
+```
+
+### 🔍 **searcher-rs** (Port 8001)
+- **Purpose**: Real-time arbitrage opportunity detection
+- **Features**: Multi-DEX scanning, price monitoring, opportunity identification
+- **Chains**: Ethereum, Polygon, Arbitrum, Optimism, Base, BSC
+- **DEXs**: Uniswap V2/V3, SushiSwap, Curve, Balancer, 1inch
+
+### 🎯 **selector-api** (Port 8002)
+- **Purpose**: Opportunity filtering and selection engine
+- **Features**: Profitability analysis, risk assessment, priority ranking
+- **Algorithms**: Machine learning models, statistical analysis
+- **Filters**: Min profit, max gas, slippage tolerance, confidence score
+
+### 🔄 **recon** (Port 8003)
+- **Purpose**: Blockchain reconciliation and P&L tracking
+- **Features**: Transaction verification, profit calculation, discrepancy detection
+- **Reports**: Real-time P&L, execution analytics, performance metrics
+
+### 📡 **relays-client** (Port 8004)
+- **Purpose**: MEV relay integration and bundle submission
+- **Relays**: Flashbots, Eden Network, Manifold Finance, BloXroute
+- **Features**: Multi-relay submission, retry logic, success tracking
+- **Optimization**: Bundle merging, gas optimization, timing strategies
+
+### 🌐 **api-server** (Port 8000)
+- **Purpose**: REST API and WebSocket gateway
+- **Endpoints**: Opportunities, executions, metrics, authentication
+- **WebSocket**: Real-time updates, live trading data
+- **Security**: JWT authentication, rate limiting, CORS
+
+### 🎮 **sim-ctl** (Port 8005)
+- **Purpose**: Transaction simulation and gas estimation
+- **Features**: Pre-execution validation, gas optimization, success prediction
+- **Providers**: Tenderly, Flashbots Simulator, custom simulation engine
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- **Rust 1.70+**
+- **Docker & Docker Compose**
+- **PostgreSQL 14+**
+- **Redis 6.2+**
+- **Node.js 18+** (for some utilities)
+
+### Installation
 
 ```bash
-# Clonar repositorio
+# 1. Clone the repository
 git clone https://github.com/hefarica/ARBITRAGEX-CONTABO-BACKEND.git
 cd ARBITRAGEX-CONTABO-BACKEND
 
-# Configurar variables de entorno
+# 2. Set up environment variables
 cp .env.example .env
-# Editar .env con tus configuraciones
+# Edit .env with your configuration (see Environment Variables section)
 
-# Instalar dependencias
-make install
+# 3. Install dependencies
+cargo build --release
 
-# Configurar base de datos
-make setup-db
+# 4. Set up database
+docker-compose up -d postgres redis
+sqlx migrate run
 
-# Iniciar servicios
-make start-dev
+# 5. Start all services
+./scripts/start.sh
+
+# 6. Verify services are running
+curl http://localhost:8000/health
 ```
 
-### **Configuración de Entornos**
+### Docker Deployment
 
-```bash
-# Desarrollo
-make start-dev
-
-# Staging
-make start-staging
-
-# Producción
-make start-prod
-```
-
----
-
-## 🦀 **RUST MEV ENGINE CORE**
-
-### **Servicios Principales**
-
-#### **1. Searcher Engine (Puerto 8079)**
-- **Detección de Oportunidades**: Algoritmos avanzados para identificar arbitraje
-- **Estrategias MEV**: Flash loans, cross-chain, triangular arbitrage
-- **Optimización de Gas**: Cálculo dinámico de gas fees
-- **Gestión de Riesgo**: Evaluación y mitigación de riesgos
-
-#### **2. Simulation Controller (Puerto 8545)**
-- **Fork Management**: Gestión de forks de blockchain con Anvil
 - **Validación de Estrategias**: Simulación antes de ejecución real
 - **Cálculo de ROI**: Análisis de rentabilidad potencial
 - **Optimización de Performance**: Ejecución paralela de simulaciones

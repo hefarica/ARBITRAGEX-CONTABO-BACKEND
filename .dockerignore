@@ -1,0 +1,130 @@
+# ArbitrageX Supreme V3.0 - Docker Ignore Configuration
+# Exclude unnecessary files from Docker build context
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+docs/
+*.md
+
+# Development files
+.env*
+!.env.example
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts (keep only what's needed)
+target/debug/
+target/doc/
+target/tmp/
+**/*.rs.bk
+*.pdb
+
+# Test files
+tests/
+benches/
+coverage/
+*.profraw
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (avoid recursion)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# IDE and editor files
+*.sublime-*
+*.code-workspace
+
+# Package managers
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+dump.rdb
+*.sql.backup
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Archive files
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Large files that shouldn't be in containers
+*.iso
+*.dmg
+*.exe
+*.msi
+
+# Development tools
+flamegraph.svg
+perf.data*
+callgrind.out.*
+
+# Monitoring data
+prometheus_data/
+grafana_data/
+
+# Secrets and keys (extra safety)
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+keys/
+
+# Local configuration
+local/
+.local/
+
+# Cache directories
+.cache/
+cache/
+
+# Build outputs we don't need
+dist/
+build/
+out/
+
+# Rust-specific excludes
+Cargo.lock
+# Keep Cargo.toml files as they're needed for builds

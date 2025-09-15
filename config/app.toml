@@ -1,0 +1,147 @@
+# ArbitrageX Supreme V3.0 - Application Configuration
+# Central configuration file for all ArbitrageX services
+
+[app]
+name = "ArbitrageX Supreme"
+version = "3.0.0"
+environment = "production"
+debug = false
+log_level = "info"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+workers = 4
+max_connections = 1000
+request_timeout = 30
+keep_alive = 75
+shutdown_timeout = 30
+
+[database]
+host = "postgres"
+port = 5432
+name = "arbitragex_supreme"
+user = "arbitragex"
+password = "${DATABASE_PASSWORD}"
+max_connections = 20
+min_connections = 5
+connection_timeout = 30
+idle_timeout = 600
+max_lifetime = 1800
+
+[redis]
+host = "redis"
+port = 6379
+password = "${REDIS_PASSWORD}"
+database = 0
+max_connections = 10
+connection_timeout = 5
+command_timeout = 10
+
+[blockchain]
+ethereum_rpc = "${ETHEREUM_RPC_URL}"
+ethereum_ws = "${ETHEREUM_WS_URL}"
+polygon_rpc = "${POLYGON_RPC_URL}"
+arbitrum_rpc = "${ARBITRUM_RPC_URL}"
+optimism_rpc = "${OPTIMISM_RPC_URL}"
+base_rpc = "${BASE_RPC_URL}"
+bsc_rpc = "${BSC_RPC_URL}"
+
+[mev]
+flashbots_api_key = "${FLASHBOTS_API_KEY}"
+flashbots_signing_key = "${FLASHBOTS_SIGNING_KEY}"
+eden_api_key = "${EDEN_API_KEY}"
+manifold_api_key = "${MANIFOLD_API_KEY}"
+bloxroute_api_key = "${BLOXROUTE_API_KEY}"
+
+[security]
+jwt_secret = "${JWT_SECRET}"
+jwt_expiry_hours = 24
+rate_limit_per_minute = 100
+cors_origins = ["*"]
+api_key = "${API_KEY}"
+
+[monitoring]
+prometheus_enabled = true
+prometheus_port = 9090
+grafana_enabled = true
+grafana_port = 3000
+metrics_interval = 30
+health_check_interval = 60
+
+[arbitrage]
+min_profit_usd = 10.0
+max_gas_price_gwei = 100
+max_slippage_percent = 2.0
+execution_timeout_seconds = 30
+confirmation_blocks = 1
+retry_attempts = 3
+
+[services]
+[services.searcher]
+enabled = true
+port = 8082
+scan_interval_ms = 100
+max_opportunities = 1000
+profit_threshold_usd = 5.0
+
+[services.selector_api]
+enabled = true
+port = 8081
+selection_timeout_ms = 500
+max_concurrent_selections = 10
+ml_scoring_enabled = true
+
+[services.recon]
+enabled = true
+port = 8083
+reconciliation_interval_seconds = 60
+max_pending_reconciliations = 100
+discrepancy_threshold_percent = 5.0
+
+[services.relays_client]
+enabled = true
+port = 8084
+submission_timeout_seconds = 30
+max_concurrent_submissions = 10
+retry_delay_seconds = 2
+
+[services.sim_ctl]
+enabled = true
+port = 8085
+simulation_timeout_seconds = 10
+max_concurrent_simulations = 5
+foundry_enabled = true
+
+[logging]
+level = "info"
+format = "json"
+file_enabled = true
+file_path = "/var/log/arbitragex/app.log"
+max_file_size = "100MB"
+max_files = 10
+console_enabled = true
+
+[performance]
+worker_threads = 4
+blocking_threads = 512
+thread_stack_size = "2MB"
+max_memory_mb = 4096
+gc_threshold_mb = 1024
+
+[features]
+advanced_analytics = true
+ml_predictions = true
+cross_chain_arbitrage = true
+flash_loans = true
+mev_protection = true
+sandwich_detection = true
+frontrunning_protection = true
+
+[alerts]
+slack_webhook = "${SLACK_WEBHOOK_URL}"
+discord_webhook = "${DISCORD_WEBHOOK_URL}"
+email_enabled = false
+sms_enabled = false
+profit_threshold_usd = 1000.0
+loss_threshold_usd = 100.0
