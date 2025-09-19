@@ -1,50 +1,59 @@
 #!/bin/bash
+# ArbitrageX Supreme V3.0 - Deployment Automation Scripts
+# Paquete Operativo Completo - Automatización de Despliegue
 
-# ArbitrageX Supreme v3.0 - Deployment Script
-# Usage: ./deploy.sh [dev|staging|prod]
-
-set -euo pipefail
+set -e
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # Configuration
-ENVIRONMENT=${1:-dev}
-PROJECT_ROOT="/root/arbitragex/backend"
-BACKUP_DIR="/root/arbitragex/backups"
-LOG_FILE="/var/log/arbitragex/deploy-$(date +%Y%m%d-%H%M%S).log"
+BACKEND_REPO="https://github.com/hefarica/ARBITRAGEX-CONTABO-BACKEND.git"
+EDGE_REPO="https://github.com/hefarica/ARBITRAGEXSUPREME.git"
+FRONTEND_REPO="https://github.com/hefarica/show-my-github-gems.git"
 
-# Functions
+DEPLOY_DIR="/opt/arbitragex"
+BACKUP_DIR="/opt/arbitragex-backups"
+LOG_FILE="/var/log/arbitragex-deploy.log"
+
+# =====================================================
+# UTILITY FUNCTIONS
+# =====================================================
+
 log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
 }
 
-error() {
-    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"
-    exit 1
+success() {
+    echo -e "${GREEN}✅ $1${NC}" | tee -a "$LOG_FILE"
 }
 
 warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${YELLOW}⚠️  $1${NC}" | tee -a "$LOG_FILE"
 }
 
-# Check environment
-check_environment() {
-    log "Checking deployment environment..."
+error() {
+    echo -e "${RED}❌ $1${NC}" | tee -a "$LOG_FILE"
+    exit 1
+}
+
+check_prerequisites() {
+    log "Checking prerequisites..."
     
     # Check if running as root or with sudo
     if [[ $EUID -ne 0 ]]; then
         error "This script must be run as root or with sudo"
     fi
     
-    # Check required tools
-    for cmd in git docker docker-compose curl jq; do
-        if ! command -v $cmd &> /dev/null; then
-            error "$cmd is required but not installed"
+    # Check required commands
+    local required_commands=("docker" "docker-compose" "git" "curl" "jq" "wrangler" "npm")
+    for cmd in "${required_commands[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            error "Required command '$cmd' is not installed"
         fi
     done
     
@@ -53,318 +62,590 @@ check_environment() {
         error "Docker daemon is not running"
     fi
     
-    log "Environment check passed ✓"
+    success "Prerequisites check passed"
 }
 
-# Backup current deployment
-backup_current() {
+create_directories() {
+    log "Creating deployment directories..."
+    
+    mkdir -p "$DEPLOY_DIR"/{backend,edge,frontend}
+    mkdir -p "$BACKUP_DIR"
+    mkdir -p /var/log/arbitragex
+    
+    success "Directories created"
+}
+
+# =====================================================
+# BACKUP FUNCTIONS
+# =====================================================
+
+backup_current_deployment() {
     log "Creating backup of current deployment..."
     
-    BACKUP_NAME="backup-$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$BACKUP_DIR/$BACKUP_NAME"
+    local backup_timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_path="$BACKUP_DIR/backup_$backup_timestamp"
     
-    # Backup database
-    docker exec arbitragex-postgres pg_dump -U arbitragex arbitragex | \
-        gzip > "$BACKUP_DIR/$BACKUP_NAME/database.sql.gz"
-    
-    # Backup Redis
-    docker exec arbitragex-redis redis-cli --rdb "$BACKUP_DIR/$BACKUP_NAME/redis.rdb"
-    
-    # Backup configuration files
-    cp -r "$PROJECT_ROOT"/.env* "$BACKUP_DIR/$BACKUP_NAME/" 2>/dev/null || true
-    
-    log "Backup completed: $BACKUP_DIR/$BACKUP_NAME"
+    if [ -d "$DEPLOY_DIR" ]; then
+        cp -r "$DEPLOY_DIR" "$backup_path"
+        success "Backup created at $backup_path"
+    else
+        warning "No existing deployment to backup"
+    fi
 }
 
-# Pull latest code
-update_code() {
-    log "Pulling latest code from repository..."
+restore_from_backup() {
+    local backup_path="$1"
     
-    cd "$PROJECT_ROOT"
+    if [ -z "$backup_path" ]; then
+        error "Backup path not specified"
+    fi
     
-    # Stash any local changes
-    git stash
+    if [ ! -d "$backup_path" ]; then
+        error "Backup path does not exist: $backup_path"
+    fi
     
-    # Pull latest changes
-    git pull origin main
-    
-    # Update submodules if any
-    git submodule update --init --recursive
-    
-    log "Code updated to latest version"
-}
-
-# Build services
-build_services() {
-    log "Building Docker images..."
-    
-    cd "$PROJECT_ROOT"
-    
-    # Build with appropriate compose file
-    case $ENVIRONMENT in
-        prod)
-            docker-compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml build --parallel
-            ;;
-        *)
-            docker-compose -f docker/docker-compose.yml build --parallel
-            ;;
-    esac
-    
-    log "Docker images built successfully"
-}
-
-# Deploy services
-deploy_services() {
-    log "Deploying services..."
-    
-    cd "$PROJECT_ROOT"
+    log "Restoring from backup: $backup_path"
     
     # Stop current services
-    log "Stopping current services..."
-    docker-compose -f docker/docker-compose.yml down
+    stop_all_services
     
-    # Start services based on environment
-    case $ENVIRONMENT in
-        prod)
-            log "Starting production services..."
-            docker-compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d
-            ;;
-        *)
-            log "Starting development services..."
-            docker-compose -f docker/docker-compose.yml up -d
-            ;;
-    esac
+    # Remove current deployment
+    rm -rf "$DEPLOY_DIR"
     
-    # Wait for services to be healthy
-    log "Waiting for services to be healthy..."
-    sleep 10
+    # Restore from backup
+    cp -r "$backup_path" "$DEPLOY_DIR"
     
-    # Check service health
-    check_service_health
+    # Start services
+    start_all_services
+    
+    success "Restored from backup successfully"
 }
 
-# Check service health
-check_service_health() {
-    log "Checking service health..."
+# =====================================================
+# BACKEND DEPLOYMENT
+# =====================================================
+
+deploy_backend() {
+    log "Deploying ArbitrageX Backend..."
     
-    SERVICES=(
-        "arbitragex-postgres:5432"
-        "arbitragex-redis:6379"
-        "arbitragex-selector:8080/health"
-        "arbitragex-simctl:8081/health"
-    )
+    cd "$DEPLOY_DIR/backend"
     
-    for service in "${SERVICES[@]}"; do
-        IFS=':' read -r container endpoint <<< "$service"
+    # Clone or update repository
+    if [ -d ".git" ]; then
+        log "Updating existing backend repository..."
+        git fetch origin
+        git reset --hard origin/main
+    else
+        log "Cloning backend repository..."
+        git clone "$BACKEND_REPO" .
+    fi
+    
+    # Load environment variables
+    if [ -f ".env.production" ]; then
+        log "Loading production environment variables..."
+        export $(cat .env.production | grep -v '^#' | xargs)
+    else
+        warning "No .env.production file found, using defaults"
+    fi
+    
+    # Build and deploy services
+    log "Building backend services..."
+    docker-compose -f docker-compose.prod.yml build --no-cache
+    
+    log "Starting backend services..."
+    docker-compose -f docker-compose.prod.yml up -d
+    
+    # Wait for services to be ready
+    log "Waiting for backend services to be ready..."
+    sleep 30
+    
+    # Run health checks
+    local services=("api-server:8080" "searcher-rs:8081" "selector-api:8082" "recon:8083" "relays-client:8084" "sim-ctl:8085")
+    for service in "${services[@]}"; do
+        local service_name=$(echo "$service" | cut -d':' -f1)
+        local port=$(echo "$service" | cut -d':' -f2)
         
-        if [[ $endpoint == *"/health"* ]]; then
-            # HTTP health check
-            if curl -f -s "http://localhost:${endpoint}" > /dev/null; then
-                log "✓ $container is healthy"
-            else
-                error "$container health check failed"
-            fi
+        if curl -f -s "http://localhost:$port/health" > /dev/null; then
+            success "$service_name is healthy"
         else
-            # Port check
-            if docker exec $container echo "OK" &> /dev/null; then
-                log "✓ $container is running"
-            else
-                error "$container is not running"
-            fi
+            error "$service_name health check failed"
         fi
     done
+    
+    success "Backend deployment completed"
 }
 
-# Run migrations
-run_migrations() {
-    log "Running database migrations..."
+# =====================================================
+# EDGE DEPLOYMENT
+# =====================================================
+
+deploy_edge() {
+    log "Deploying ArbitrageX Edge Workers..."
     
-    # Wait for PostgreSQL to be ready
-    until docker exec arbitragex-postgres pg_isready -U arbitragex; do
-        log "Waiting for PostgreSQL..."
-        sleep 2
-    done
+    cd "$DEPLOY_DIR/edge"
+    
+    # Clone or update repository
+    if [ -d ".git" ]; then
+        log "Updating existing edge repository..."
+        git fetch origin
+        git reset --hard origin/main
+    else
+        log "Cloning edge repository..."
+        git clone "$EDGE_REPO" .
+    fi
+    
+    # Install dependencies
+    log "Installing edge dependencies..."
+    npm ci
+    
+    # Set up Cloudflare secrets
+    log "Setting up Cloudflare secrets..."
+    if [ -n "$JWT_SECRET" ]; then
+        echo "$JWT_SECRET" | wrangler secret put JWT_SECRET --env production
+    fi
+    if [ -n "$API_KEY" ]; then
+        echo "$API_KEY" | wrangler secret put API_KEY --env production
+    fi
+    if [ -n "$BACKEND_API_KEY" ]; then
+        echo "$BACKEND_API_KEY" | wrangler secret put BACKEND_API_KEY --env production
+    fi
+    
+    # Run D1 migrations
+    log "Running D1 database migrations..."
+    wrangler d1 migrations apply arbitragex-db-prod --env production
+    
+    # Deploy workers
+    log "Deploying Cloudflare Workers..."
+    wrangler deploy --env production
+    
+    # Set up KV namespaces
+    log "Setting up KV namespaces..."
+    wrangler kv:namespace create "CONFIG_STORE" --env production
+    wrangler kv:namespace create "CACHE_STORE" --env production
+    
+    # Configure custom domains
+    log "Configuring custom domains..."
+    wrangler route add "arbitragex.app/*" arbitragex-worker --env production
+    wrangler route add "api.arbitragex.app/*" arbitragex-api-proxy --env production
+    
+    # Health check
+    sleep 10
+    if curl -f -s "https://arbitragex.workers.dev/health" > /dev/null; then
+        success "Edge workers are healthy"
+    else
+        error "Edge workers health check failed"
+    fi
+    
+    success "Edge deployment completed"
+}
+
+# =====================================================
+# FRONTEND DEPLOYMENT
+# =====================================================
+
+deploy_frontend() {
+    log "Deploying ArbitrageX Frontend..."
+    
+    cd "$DEPLOY_DIR/frontend"
+    
+    # Clone or update repository
+    if [ -d ".git" ]; then
+        log "Updating existing frontend repository..."
+        git fetch origin
+        git reset --hard origin/main
+    else
+        log "Cloning frontend repository..."
+        git clone "$FRONTEND_REPO" .
+    fi
+    
+    # Install dependencies
+    log "Installing frontend dependencies..."
+    npm ci
+    
+    # Build for production
+    log "Building frontend for production..."
+    VITE_API_BASE_URL="https://api.arbitragex.dev" \
+    VITE_EDGE_URL="https://arbitragex.workers.dev" \
+    VITE_WS_URL="wss://arbitragex.workers.dev/ws" \
+    npm run build
+    
+    # Deploy to Cloudflare Pages
+    log "Deploying to Cloudflare Pages..."
+    npx wrangler pages deploy dist --project-name=arbitragex-app --env=production
+    
+    # Configure custom domain
+    log "Configuring custom domain..."
+    npx wrangler pages domain add arbitragex.app --project-name=arbitragex-app
+    npx wrangler pages domain add www.arbitragex.app --project-name=arbitragex-app
+    
+    # Health check
+    sleep 15
+    if curl -f -s "https://arbitragex.app" > /dev/null; then
+        success "Frontend is accessible"
+    else
+        error "Frontend health check failed"
+    fi
+    
+    success "Frontend deployment completed"
+}
+
+# =====================================================
+# DATABASE OPERATIONS
+# =====================================================
+
+setup_databases() {
+    log "Setting up databases..."
+    
+    # PostgreSQL setup
+    log "Setting up PostgreSQL..."
+    docker-compose -f "$DEPLOY_DIR/backend/docker-compose.prod.yml" exec -T postgres psql -U arbitragex_user -d arbitragex_prod -f /docker-entrypoint-initdb.d/schema.sql
     
     # Run migrations
-    docker exec arbitragex-postgres psql -U arbitragex -d arbitragex -f /docker-entrypoint-initdb.d/01-schema.sql
+    log "Running PostgreSQL migrations..."
+    cd "$DEPLOY_DIR/backend"
+    docker-compose -f docker-compose.prod.yml exec -T api-server ./scripts/migrate.sh
     
-    log "Migrations completed"
+    success "Databases setup completed"
 }
 
-# Update monitoring
-update_monitoring() {
-    log "Updating monitoring configuration..."
+# =====================================================
+# MONITORING SETUP
+# =====================================================
+
+setup_monitoring() {
+    log "Setting up monitoring stack..."
     
-    # Reload Prometheus configuration
-    curl -X POST http://localhost:9090/-/reload || warning "Failed to reload Prometheus"
+    cd "$DEPLOY_DIR"
     
-    # Restart Grafana to pick up new dashboards
-    docker restart arbitragex-grafana || warning "Failed to restart Grafana"
+    # Create monitoring directory
+    mkdir -p monitoring/{dashboards,datasources,alerts}
     
-    log "Monitoring updated"
+    # Copy monitoring configuration
+    cp backend/monitoring/* monitoring/
+    
+    # Start monitoring stack
+    docker-compose -f monitoring/docker-compose.monitoring.yml up -d
+    
+    # Wait for Grafana to be ready
+    log "Waiting for Grafana to be ready..."
+    sleep 30
+    
+    # Import dashboards
+    log "Importing Grafana dashboards..."
+    curl -X POST \
+        -H "Content-Type: application/json" \
+        -d @monitoring/dashboards/arbitragex-backend.json \
+        "http://admin:${GRAFANA_ADMIN_PASSWORD}@localhost:3000/api/dashboards/db"
+    
+    success "Monitoring setup completed"
 }
 
-# Send deployment notification
-send_notification() {
-    local status=$1
-    local message=$2
+# =====================================================
+# SERVICE MANAGEMENT
+# =====================================================
+
+start_all_services() {
+    log "Starting all ArbitrageX services..."
     
-    # Webhook URL (configure as needed)
-    WEBHOOK_URL=${DEPLOY_WEBHOOK_URL:-""}
+    # Start backend services
+    cd "$DEPLOY_DIR/backend"
+    docker-compose -f docker-compose.prod.yml up -d
     
-    if [[ -n "$WEBHOOK_URL" ]]; then
-        curl -X POST "$WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "{
-                \"text\": \"ArbitrageX Deployment [$ENVIRONMENT]\",
-                \"status\": \"$status\",
-                \"message\": \"$message\",
-                \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
-            }" || warning "Failed to send notification"
+    # Start monitoring
+    cd "$DEPLOY_DIR"
+    docker-compose -f monitoring/docker-compose.monitoring.yml up -d
+    
+    success "All services started"
+}
+
+stop_all_services() {
+    log "Stopping all ArbitrageX services..."
+    
+    # Stop backend services
+    if [ -f "$DEPLOY_DIR/backend/docker-compose.prod.yml" ]; then
+        cd "$DEPLOY_DIR/backend"
+        docker-compose -f docker-compose.prod.yml down
     fi
+    
+    # Stop monitoring
+    if [ -f "$DEPLOY_DIR/monitoring/docker-compose.monitoring.yml" ]; then
+        cd "$DEPLOY_DIR"
+        docker-compose -f monitoring/docker-compose.monitoring.yml down
+    fi
+    
+    success "All services stopped"
 }
 
-# Main deployment flow
-main() {
-    log "Starting ArbitrageX deployment for environment: $ENVIRONMENT"
+restart_all_services() {
+    log "Restarting all ArbitrageX services..."
+    stop_all_services
+    sleep 5
+    start_all_services
+    success "All services restarted"
+}
+
+# =====================================================
+# HEALTH CHECKS
+# =====================================================
+
+run_health_checks() {
+    log "Running comprehensive health checks..."
     
-    # Create log directory
-    mkdir -p "$(dirname "$LOG_FILE")"
+    local failed_checks=0
     
-    timeout=0
-    while [ $timeout -lt $HEALTH_CHECK_TIMEOUT ]; do
-        if curl -f "$service_url" >/dev/null 2>&1; then
-            success "$service_name is healthy"
-            return 0
+    # Backend health checks
+    local backend_services=("8080" "8081" "8082" "8083" "8084" "8085")
+    for port in "${backend_services[@]}"; do
+        if curl -f -s "http://localhost:$port/health" > /dev/null; then
+            success "Backend service on port $port is healthy"
+        else
+            error "Backend service on port $port is unhealthy"
+            ((failed_checks++))
         fi
-        sleep $HEALTH_CHECK_INTERVAL
-        timeout=$((timeout + HEALTH_CHECK_INTERVAL))
     done
     
-    error "$service_name health check failed after $HEALTH_CHECK_TIMEOUT seconds"
-    return 1
-}
-
-# Perform health checks
-log "Performing health checks..."
-health_checks_passed=true
-
-# API Server health check
-if ! health_check "http://localhost:8080/health" "API Server"; then
-    health_checks_passed=false
-fi
-
-# Selector API health check
-if ! health_check "http://localhost:8081/health" "Selector API"; then
-    health_checks_passed=false
-fi
-
-# Database connectivity check
-if docker-compose -f docker-compose.prod.yml exec -T postgres pg_isready -U arbitragex >/dev/null 2>&1; then
-    success "Database is healthy"
-else
-    error "Database health check failed"
-    health_checks_passed=false
-fi
-
-# Redis connectivity check
-if docker-compose -f docker-compose.prod.yml exec -T redis redis-cli ping >/dev/null 2>&1; then
-    success "Redis is healthy"
-else
-    error "Redis health check failed"
-    health_checks_passed=false
-fi
-
-# Check if all health checks passed
-if [ "$health_checks_passed" = "false" ]; then
-    if [ "$FORCE_DEPLOY" = "false" ]; then
-        error "Health checks failed. Deployment aborted."
-        rollback
-        exit 1
+    # Edge health check
+    if curl -f -s "https://arbitragex.workers.dev/health" > /dev/null; then
+        success "Edge workers are healthy"
     else
-        warning "Health checks failed, but continuing due to --force flag"
-    fi
-fi
-
-# Run database migrations
-log "Running database migrations..."
-if docker-compose -f docker-compose.prod.yml exec -T api-server sqlx migrate run; then
-    success "Database migrations completed"
-else
-    warning "Database migrations failed or no migrations to run"
-fi
-
-# Show deployment status
-log "Deployment status:"
-docker-compose -f docker-compose.prod.yml ps
-
-# Show resource usage
-log "Resource usage:"
-docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
-
-# Create deployment record
-deployment_record="{
-    \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
-    \"environment\": \"$DEPLOYMENT_ENV\",
-    \"git_branch\": \"$GIT_BRANCH\",
-    \"git_commit\": \"$(git rev-parse HEAD)\",
-    \"image_tag\": \"$IMAGE_TAG\",
-    \"deployed_by\": \"$(whoami)\",
-    \"status\": \"success\"
-}"
-
-mkdir -p ./deployments
-echo "$deployment_record" > "./deployments/deployment_$(date +%Y%m%d_%H%M%S).json"
-
-# Success message
-echo ""
-success " ArbitrageX deployment completed successfully!"
-echo ""
-log "Deployment Information:"
-echo "  • Environment:       $DEPLOYMENT_ENV"
-echo "  • Git Branch:        $GIT_BRANCH"
-echo "  • Git Commit:        $(git rev-parse --short HEAD)"
-echo "  • Image Tag:         $IMAGE_TAG"
-echo "  • Deployed At:       $(date)"
-echo "  • Deployed By:       $(whoami)"
-echo ""
-log "Service Endpoints:"
-echo "  • API Server:        http://localhost:8080"
-echo "  • Selector API:      http://localhost:8081"
-echo "  • Health Check:      http://localhost:8080/health"
-echo "  • Metrics:           http://localhost:8080/api/v1/metrics"
-echo "  • WebSocket:         ws://localhost:8080/ws"
-echo "  • Grafana:           http://localhost:3000 (admin/admin)"
-echo "  • Prometheus:        http://localhost:9090"
-echo ""
-log "Useful Commands:"
-echo "  • View logs:         docker-compose -f docker-compose.prod.yml logs -f"
-echo "  • Stop services:     docker-compose -f docker-compose.prod.yml down"
-echo "  • Restart service:   docker-compose -f docker-compose.prod.yml restart [service]"
-echo "  • Scale service:     docker-compose -f docker-compose.prod.yml up -d --scale [service]=N"
-echo ""
-success " ArbitrageX is ready for production MEV arbitrage!"
-
-# Rollback function
-rollback() {
-    warning "Initiating rollback..."
-    docker-compose -f docker-compose.prod.yml down
-    
-    # Restore from backup if available
-    if [ "$BACKUP_ENABLED" = "true" ] && [ -f "./backups/$backup_file" ]; then
-        log "Restoring database from backup..."
-        docker-compose -f docker-compose.prod.yml up -d postgres
-        sleep 10
-        docker-compose -f docker-compose.prod.yml exec -T postgres psql -U arbitragex -d arbitragex_supreme < "./backups/$backup_file"
-        success "Database restored from backup"
+        warning "Edge workers health check failed"
+        ((failed_checks++))
     fi
     
-    error "Rollback completed"
+    # Frontend health check
+    if curl -f -s "https://arbitragex.app" > /dev/null; then
+        success "Frontend is accessible"
+    else
+        warning "Frontend health check failed"
+        ((failed_checks++))
+    fi
+    
+    # Database health check
+    if docker-compose -f "$DEPLOY_DIR/backend/docker-compose.prod.yml" exec -T postgres pg_isready -U arbitragex_user > /dev/null; then
+        success "PostgreSQL is healthy"
+    else
+        error "PostgreSQL health check failed"
+        ((failed_checks++))
+    fi
+    
+    # Redis health check
+    if docker-compose -f "$DEPLOY_DIR/backend/docker-compose.prod.yml" exec -T redis redis-cli ping | grep -q PONG; then
+        success "Redis is healthy"
+    else
+        error "Redis health check failed"
+        ((failed_checks++))
+    fi
+    
+    if [ $failed_checks -eq 0 ]; then
+        success "All health checks passed"
+        return 0
+    else
+        error "$failed_checks health checks failed"
+        return 1
+    fi
 }
 
-# Error handling
-trap 'error "Deployment failed! Check logs at: $LOG_FILE"' ERR
-main "$@"
+# =====================================================
+# E2E TESTING
+# =====================================================
 
+run_e2e_tests() {
+    log "Running E2E tests..."
+    
+    cd "$DEPLOY_DIR/frontend"
+    
+    # Install test dependencies
+    npm install -g @playwright/test
+    npx playwright install
+    
+    # Run E2E tests
+    PLAYWRIGHT_BASE_URL="https://arbitragex.app" \
+    API_BASE_URL="https://api.arbitragex.dev" \
+    npx playwright test --config=e2e/playwright.config.ts
+    
+    if [ $? -eq 0 ]; then
+        success "E2E tests passed"
+    else
+        error "E2E tests failed"
+    fi
+}
 
+# =====================================================
+# PERFORMANCE TESTING
+# =====================================================
 
+run_performance_tests() {
+    log "Running performance tests..."
+    
+    # Install k6
+    if ! command -v k6 &> /dev/null; then
+        log "Installing k6..."
+        sudo gpg -k
+        sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+        echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+        sudo apt-get update
+        sudo apt-get install k6
+    fi
+    
+    # Run performance tests
+    cd "$DEPLOY_DIR/backend"
+    k6 run --out json=performance-results.json \
+        --env BASE_URL=https://api.arbitragex.dev \
+        --env EDGE_URL=https://arbitragex.workers.dev \
+        --env TEST_TYPE=load \
+        performance/load-test.js
+    
+    # Validate SLOs
+    node scripts/validate-slos.js performance-results.json
+    
+    if [ $? -eq 0 ]; then
+        success "Performance tests passed"
+    else
+        error "Performance tests failed"
+    fi
+}
+
+# =====================================================
+# ROLLBACK FUNCTIONALITY
+# =====================================================
+
+rollback_deployment() {
+    log "Rolling back deployment..."
+    
+    # Find latest backup
+    local latest_backup=$(ls -t "$BACKUP_DIR" | head -n1)
+    
+    if [ -z "$latest_backup" ]; then
+        error "No backup found for rollback"
+    fi
+    
+    log "Rolling back to: $latest_backup"
+    restore_from_backup "$BACKUP_DIR/$latest_backup"
+    
+    success "Rollback completed"
+}
+
+# =====================================================
+# MAIN DEPLOYMENT FUNCTION
+# =====================================================
+
+full_deployment() {
+    log "Starting full ArbitrageX deployment..."
+    
+    # Prerequisites
+    check_prerequisites
+    create_directories
+    
+    # Backup current deployment
+    backup_current_deployment
+    
+    # Deploy all components
+    deploy_backend
+    deploy_edge
+    deploy_frontend
+    
+    # Setup databases and monitoring
+    setup_databases
+    setup_monitoring
+    
+    # Health checks
+    if ! run_health_checks; then
+        warning "Health checks failed, consider rollback"
+        return 1
+    fi
+    
+    # Run tests
+    run_e2e_tests
+    run_performance_tests
+    
+    success "Full deployment completed successfully!"
+    
+    # Display access information
+    echo ""
+    echo "🎉 ArbitrageX Supreme V3.0 Deployment Complete!"
+    echo "=============================================="
+    echo "Frontend: https://arbitragex.app"
+    echo "Backend API: https://api.arbitragex.dev"
+    echo "Edge Workers: https://arbitragex.workers.dev"
+    echo "Grafana: http://localhost:3000"
+    echo "Prometheus: http://localhost:9090"
+    echo "=============================================="
+}
+
+# =====================================================
+# COMMAND LINE INTERFACE
+# =====================================================
+
+show_help() {
+    echo "ArbitrageX Supreme V3.0 - Deployment Script"
+    echo "Usage: $0 [COMMAND]"
+    echo ""
+    echo "Commands:"
+    echo "  deploy-full      Full deployment (backend + edge + frontend)"
+    echo "  deploy-backend   Deploy backend only"
+    echo "  deploy-edge      Deploy edge workers only"
+    echo "  deploy-frontend  Deploy frontend only"
+    echo "  start            Start all services"
+    echo "  stop             Stop all services"
+    echo "  restart          Restart all services"
+    echo "  health           Run health checks"
+    echo "  test-e2e         Run E2E tests"
+    echo "  test-perf        Run performance tests"
+    echo "  rollback         Rollback to previous deployment"
+    echo "  backup           Create backup of current deployment"
+    echo "  help             Show this help message"
+    echo ""
+    echo "Environment Variables:"
+    echo "  GRAFANA_ADMIN_PASSWORD  Grafana admin password"
+    echo "  JWT_SECRET              JWT secret for authentication"
+    echo "  API_KEY                 API key for services"
+    echo "  CLOUDFLARE_API_TOKEN    Cloudflare API token"
+    echo ""
+}
+
+# Main script logic
+case "${1:-help}" in
+    deploy-full)
+        full_deployment
+        ;;
+    deploy-backend)
+        check_prerequisites
+        backup_current_deployment
+        deploy_backend
+        ;;
+    deploy-edge)
+        check_prerequisites
+        deploy_edge
+        ;;
+    deploy-frontend)
+        check_prerequisites
+        deploy_frontend
+        ;;
+    start)
+        start_all_services
+        ;;
+    stop)
+        stop_all_services
+        ;;
+    restart)
+        restart_all_services
+        ;;
+    health)
+        run_health_checks
+        ;;
+    test-e2e)
+        run_e2e_tests
+        ;;
+    test-perf)
+        run_performance_tests
+        ;;
+    rollback)
+        rollback_deployment
+        ;;
+    backup)
+        backup_current_deployment
+        ;;
+    help|*)
+        show_help
+        ;;
+esac

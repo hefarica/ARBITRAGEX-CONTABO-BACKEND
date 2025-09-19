@@ -1,206 +1,224 @@
--- ArbitrageX Supreme V3.0 - Initial Database Schema Migration
--- Creates all required tables, indexes, and constraints for the ArbitrageX system
+-- ArbitrageX Supreme V3.0 - Database Migrations
+-- Paquete Operativo Completo - PostgreSQL & D1
 
--- Enable necessary extensions
+-- =====================================================
+-- POSTGRESQL MIGRATIONS (Backend/Contabo)
+-- Ubicación: migrations/001_initial_schema.sql
+-- =====================================================
+
+-- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE EXTENSION IF NOT EXISTS "btree_gin";
 
 -- Create custom types
-CREATE TYPE opportunity_status AS ENUM ('pending', 'analyzing', 'selected', 'executing', 'completed', 'failed', 'expired');
-CREATE TYPE execution_status AS ENUM ('pending', 'submitted', 'confirmed', 'failed', 'reverted');
-CREATE TYPE chain_type AS ENUM ('ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'bsc');
-CREATE TYPE reconciliation_status AS ENUM ('pending', 'in_progress', 'reconciled', 'failed', 'discrepancy');
+CREATE TYPE opportunity_status AS ENUM ('active', 'executed', 'expired', 'failed');
+CREATE TYPE execution_status AS ENUM ('pending', 'executing', 'completed', 'failed', 'cancelled');
+CREATE TYPE strategy_type AS ENUM ('arbitrage', 'flashloan', 'mev', 'cross_chain');
+CREATE TYPE chain_type AS ENUM ('ethereum', 'polygon', 'bsc', 'arbitrum', 'optimism');
+
+-- =====================================================
+-- CORE TABLES
+-- =====================================================
 
 -- Opportunities table
 CREATE TABLE opportunities (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pair_address VARCHAR(42) NOT NULL,
+    token_a_address VARCHAR(42) NOT NULL,
+    token_b_address VARCHAR(42) NOT NULL,
+    token_a_symbol VARCHAR(20) NOT NULL,
+    token_b_symbol VARCHAR(20) NOT NULL,
+    dex_a VARCHAR(50) NOT NULL,
+    dex_b VARCHAR(50) NOT NULL,
+    price_a DECIMAL(36, 18) NOT NULL,
+    price_b DECIMAL(36, 18) NOT NULL,
+    profit_potential DECIMAL(36, 18) NOT NULL,
+    profit_percentage DECIMAL(10, 6) NOT NULL,
+    gas_cost DECIMAL(36, 18) NOT NULL,
+    net_profit DECIMAL(36, 18) NOT NULL,
+    liquidity_a DECIMAL(36, 18) NOT NULL,
+    liquidity_b DECIMAL(36, 18) NOT NULL,
     chain chain_type NOT NULL,
-    token_a VARCHAR(42) NOT NULL,
-    token_b VARCHAR(42) NOT NULL,
-    dex_a VARCHAR(100) NOT NULL,
-    dex_b VARCHAR(100) NOT NULL,
-    amount_in DECIMAL(78, 18) NOT NULL,
-    amount_out DECIMAL(78, 18) NOT NULL,
-    profit_usd DECIMAL(20, 8) NOT NULL,
-    gas_estimate BIGINT NOT NULL,
-    gas_price_gwei BIGINT NOT NULL,
-    price_impact DECIMAL(10, 6) NOT NULL,
-    confidence_score DECIMAL(5, 4) NOT NULL,
-    status opportunity_status NOT NULL DEFAULT 'pending',
-    block_number BIGINT,
+    status opportunity_status DEFAULT 'active',
+    block_number BIGINT NOT NULL,
     transaction_hash VARCHAR(66),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE,
-    metadata JSONB DEFAULT '{}'::jsonb
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    
+    -- Constraints
+    CONSTRAINT positive_profit CHECK (profit_potential >= 0),
+    CONSTRAINT valid_addresses CHECK (
+        pair_address ~ '^0x[a-fA-F0-9]{40}$' AND
+        token_a_address ~ '^0x[a-fA-F0-9]{40}$' AND
+        token_b_address ~ '^0x[a-fA-F0-9]{40}$'
+    )
 );
 
 -- Executions table
 CREATE TABLE executions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     opportunity_id UUID NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
-    tx_hash VARCHAR(66),
-    status execution_status NOT NULL DEFAULT 'pending',
-    profit_expected_usd DECIMAL(20, 8),
-    profit_actual_usd DECIMAL(20, 8),
-    gas_estimate BIGINT,
+    strategy_type strategy_type NOT NULL,
+    amount_in DECIMAL(36, 18) NOT NULL,
+    amount_out DECIMAL(36, 18),
     gas_used BIGINT,
-    gas_price_estimate_gwei BIGINT,
-    gas_price_actual_gwei BIGINT,
+    gas_price DECIMAL(36, 18),
+    transaction_hash VARCHAR(66),
     block_number BIGINT,
-    executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    confirmed_at TIMESTAMP WITH TIME ZONE,
+    status execution_status DEFAULT 'pending',
     error_message TEXT,
-    retry_count INTEGER DEFAULT 0,
-    metadata JSONB DEFAULT '{}'::jsonb
-);
-
--- Reconciliation records table
-CREATE TABLE reconciliation_records (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    execution_id UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
-    opportunity_id UUID NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+    profit_realized DECIMAL(36, 18),
+    slippage DECIMAL(10, 6),
+    execution_time_ms INTEGER,
     chain chain_type NOT NULL,
-    tx_hash VARCHAR(66),
-    block_number BIGINT,
-    status reconciliation_status NOT NULL DEFAULT 'pending',
-    expected_profit_usd DECIMAL(20, 8),
-    actual_profit_usd DECIMAL(20, 8),
-    gas_estimate BIGINT,
-    gas_used BIGINT,
-    gas_price_gwei BIGINT,
-    discrepancies JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    reconciled_at TIMESTAMP WITH TIME ZONE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    
+    -- Constraints
+    CONSTRAINT positive_amount CHECK (amount_in > 0),
+    CONSTRAINT valid_tx_hash CHECK (transaction_hash IS NULL OR transaction_hash ~ '^0x[a-fA-F0-9]{64}$')
 );
 
--- Bundle submissions table
-CREATE TABLE bundle_submissions (
+-- Strategies table
+CREATE TABLE strategies (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    bundle_id VARCHAR(100) NOT NULL,
-    relay_name VARCHAR(50) NOT NULL,
-    execution_id UUID REFERENCES executions(id) ON DELETE CASCADE,
-    transactions JSONB NOT NULL,
-    block_number BIGINT NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'pending',
-    submission_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    response JSONB,
-    error_message TEXT,
-    retry_count INTEGER DEFAULT 0
-);
-
--- System metrics table
-CREATE TABLE system_metrics (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    metric_name VARCHAR(100) NOT NULL,
-    metric_value DECIMAL(20, 8) NOT NULL,
-    metric_type VARCHAR(20) NOT NULL, -- 'counter', 'gauge', 'histogram'
-    labels JSONB DEFAULT '{}'::jsonb,
-    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- User sessions table
-CREATE TABLE user_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id VARCHAR(100) NOT NULL,
-    session_token VARCHAR(500) NOT NULL UNIQUE,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    type strategy_type NOT NULL,
+    description TEXT,
+    parameters JSONB NOT NULL DEFAULT '{}',
+    is_active BOOLEAN DEFAULT true,
+    min_profit_threshold DECIMAL(36, 18) NOT NULL DEFAULT 0,
+    max_gas_price DECIMAL(36, 18),
+    max_slippage DECIMAL(10, 6) DEFAULT 0.05,
+    supported_chains chain_type[] NOT NULL,
+    priority INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_activity TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    ip_address INET,
-    user_agent TEXT
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Constraints
+    CONSTRAINT positive_priority CHECK (priority >= 0),
+    CONSTRAINT valid_slippage CHECK (max_slippage >= 0 AND max_slippage <= 1)
 );
 
--- API keys table
-CREATE TABLE api_keys (
+-- Analytics table
+CREATE TABLE analytics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    key_name VARCHAR(100) NOT NULL,
-    key_hash VARCHAR(128) NOT NULL UNIQUE,
-    permissions JSONB DEFAULT '[]'::jsonb,
-    rate_limit_per_minute INTEGER DEFAULT 100,
+    date DATE NOT NULL,
+    chain chain_type NOT NULL,
+    total_opportunities INTEGER DEFAULT 0,
+    successful_executions INTEGER DEFAULT 0,
+    failed_executions INTEGER DEFAULT 0,
+    total_volume DECIMAL(36, 18) DEFAULT 0,
+    total_profit DECIMAL(36, 18) DEFAULT 0,
+    total_gas_used BIGINT DEFAULT 0,
+    average_profit_percentage DECIMAL(10, 6) DEFAULT 0,
+    success_rate DECIMAL(5, 4) DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Unique constraint for daily analytics per chain
+    UNIQUE(date, chain)
+);
+
+-- Tokens table
+CREATE TABLE tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    address VARCHAR(42) NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    decimals INTEGER NOT NULL,
+    chain chain_type NOT NULL,
+    is_verified BOOLEAN DEFAULT false,
+    price_usd DECIMAL(36, 18),
+    market_cap DECIMAL(36, 18),
+    volume_24h DECIMAL(36, 18),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Unique constraint per chain
+    UNIQUE(address, chain),
+    
+    -- Constraints
+    CONSTRAINT valid_token_address CHECK (address ~ '^0x[a-fA-F0-9]{40}$'),
+    CONSTRAINT positive_decimals CHECK (decimals >= 0 AND decimals <= 18)
+);
+
+-- DEX pairs table
+CREATE TABLE dex_pairs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    dex_name VARCHAR(50) NOT NULL,
+    pair_address VARCHAR(42) NOT NULL,
+    token_a_address VARCHAR(42) NOT NULL,
+    token_b_address VARCHAR(42) NOT NULL,
+    reserve_a DECIMAL(36, 18) NOT NULL DEFAULT 0,
+    reserve_b DECIMAL(36, 18) NOT NULL DEFAULT 0,
+    fee_percentage DECIMAL(10, 6) NOT NULL DEFAULT 0.003,
+    chain chain_type NOT NULL,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE,
-    last_used_at TIMESTAMP WITH TIME ZONE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Unique constraint
+    UNIQUE(dex_name, pair_address, chain),
+    
+    -- Constraints
+    CONSTRAINT valid_pair_address CHECK (pair_address ~ '^0x[a-fA-F0-9]{40}$'),
+    CONSTRAINT positive_reserves CHECK (reserve_a >= 0 AND reserve_b >= 0),
+    CONSTRAINT valid_fee CHECK (fee_percentage >= 0 AND fee_percentage <= 1)
 );
 
--- Configuration table
-CREATE TABLE configuration (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    config_key VARCHAR(100) NOT NULL UNIQUE,
-    config_value JSONB NOT NULL,
-    description TEXT,
-    is_encrypted BOOLEAN DEFAULT false,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+-- =====================================================
+-- INDEXES FOR PERFORMANCE
+-- =====================================================
 
--- Audit log table
-CREATE TABLE audit_log (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    entity_type VARCHAR(50) NOT NULL,
-    entity_id UUID NOT NULL,
-    action VARCHAR(20) NOT NULL, -- 'create', 'update', 'delete'
-    old_values JSONB,
-    new_values JSONB,
-    user_id VARCHAR(100),
-    ip_address INET,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Indexes for performance
-CREATE INDEX idx_opportunities_chain ON opportunities(chain);
+-- Opportunities indexes
 CREATE INDEX idx_opportunities_status ON opportunities(status);
-CREATE INDEX idx_opportunities_created_at ON opportunities(created_at);
-CREATE INDEX idx_opportunities_profit_usd ON opportunities(profit_usd DESC);
+CREATE INDEX idx_opportunities_chain ON opportunities(chain);
+CREATE INDEX idx_opportunities_created_at ON opportunities(created_at DESC);
+CREATE INDEX idx_opportunities_profit ON opportunities(profit_potential DESC);
 CREATE INDEX idx_opportunities_expires_at ON opportunities(expires_at);
-CREATE INDEX idx_opportunities_block_number ON opportunities(block_number);
+CREATE INDEX idx_opportunities_tokens ON opportunities(token_a_address, token_b_address);
+CREATE INDEX idx_opportunities_dexes ON opportunities(dex_a, dex_b);
+CREATE INDEX idx_opportunities_composite ON opportunities(status, chain, created_at DESC);
 
+-- Executions indexes
 CREATE INDEX idx_executions_opportunity_id ON executions(opportunity_id);
 CREATE INDEX idx_executions_status ON executions(status);
-CREATE INDEX idx_executions_executed_at ON executions(executed_at);
-CREATE INDEX idx_executions_tx_hash ON executions(tx_hash);
-CREATE INDEX idx_executions_block_number ON executions(block_number);
+CREATE INDEX idx_executions_chain ON executions(chain);
+CREATE INDEX idx_executions_created_at ON executions(created_at DESC);
+CREATE INDEX idx_executions_tx_hash ON executions(transaction_hash);
+CREATE INDEX idx_executions_profit ON executions(profit_realized DESC);
 
-CREATE INDEX idx_reconciliation_execution_id ON reconciliation_records(execution_id);
-CREATE INDEX idx_reconciliation_status ON reconciliation_records(status);
-CREATE INDEX idx_reconciliation_created_at ON reconciliation_records(created_at);
+-- Strategies indexes
+CREATE INDEX idx_strategies_type ON strategies(type);
+CREATE INDEX idx_strategies_active ON strategies(is_active);
+CREATE INDEX idx_strategies_priority ON strategies(priority DESC);
 
-CREATE INDEX idx_bundle_submissions_bundle_id ON bundle_submissions(bundle_id);
-CREATE INDEX idx_bundle_submissions_relay_name ON bundle_submissions(relay_name);
-CREATE INDEX idx_bundle_submissions_status ON bundle_submissions(status);
-CREATE INDEX idx_bundle_submissions_submission_time ON bundle_submissions(submission_time);
+-- Analytics indexes
+CREATE INDEX idx_analytics_date ON analytics(date DESC);
+CREATE INDEX idx_analytics_chain ON analytics(chain);
+CREATE UNIQUE INDEX idx_analytics_date_chain ON analytics(date, chain);
 
-CREATE INDEX idx_system_metrics_name ON system_metrics(metric_name);
-CREATE INDEX idx_system_metrics_recorded_at ON system_metrics(recorded_at);
-CREATE INDEX idx_system_metrics_labels ON system_metrics USING GIN(labels);
+-- Tokens indexes
+CREATE INDEX idx_tokens_address_chain ON tokens(address, chain);
+CREATE INDEX idx_tokens_symbol ON tokens(symbol);
+CREATE INDEX idx_tokens_verified ON tokens(is_verified);
+CREATE INDEX idx_tokens_price ON tokens(price_usd DESC);
 
-CREATE INDEX idx_user_sessions_token ON user_sessions(session_token);
-CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
-CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+-- DEX pairs indexes
+CREATE INDEX idx_dex_pairs_dex ON dex_pairs(dex_name);
+CREATE INDEX idx_dex_pairs_tokens ON dex_pairs(token_a_address, token_b_address);
+CREATE INDEX idx_dex_pairs_chain ON dex_pairs(chain);
+CREATE INDEX idx_dex_pairs_active ON dex_pairs(is_active);
 
-CREATE INDEX idx_api_keys_hash ON api_keys(key_hash);
-CREATE INDEX idx_api_keys_active ON api_keys(is_active);
+-- =====================================================
+-- TRIGGERS FOR AUTOMATIC UPDATES
+-- =====================================================
 
-CREATE INDEX idx_audit_log_entity ON audit_log(entity_type, entity_id);
-CREATE INDEX idx_audit_log_created_at ON audit_log(created_at);
-
--- Composite indexes for common queries
-CREATE INDEX idx_opportunities_chain_status ON opportunities(chain, status);
-CREATE INDEX idx_opportunities_status_created ON opportunities(status, created_at);
-CREATE INDEX idx_executions_status_executed ON executions(status, executed_at);
-
--- Partial indexes for active records
-CREATE INDEX idx_opportunities_active ON opportunities(created_at) WHERE status IN ('pending', 'analyzing', 'selected');
-CREATE INDEX idx_executions_active ON executions(executed_at) WHERE status IN ('pending', 'submitted');
-
--- GIN indexes for JSONB columns
-CREATE INDEX idx_opportunities_metadata ON opportunities USING GIN(metadata);
-CREATE INDEX idx_executions_metadata ON executions USING GIN(metadata);
-CREATE INDEX idx_reconciliation_discrepancies ON reconciliation_records USING GIN(discrepancies);
-
--- Functions and triggers for updated_at
+-- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -209,120 +227,279 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+-- Apply triggers to all tables
 CREATE TRIGGER update_opportunities_updated_at BEFORE UPDATE ON opportunities
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_configuration_updated_at BEFORE UPDATE ON configuration
+CREATE TRIGGER update_executions_updated_at BEFORE UPDATE ON executions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Function to clean up expired opportunities
+CREATE TRIGGER update_strategies_updated_at BEFORE UPDATE ON strategies
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_analytics_updated_at BEFORE UPDATE ON analytics
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_tokens_updated_at BEFORE UPDATE ON tokens
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_dex_pairs_updated_at BEFORE UPDATE ON dex_pairs
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- =====================================================
+-- VIEWS FOR COMMON QUERIES
+-- =====================================================
+
+-- Active opportunities with profit ranking
+CREATE VIEW v_active_opportunities AS
+SELECT 
+    o.*,
+    ta.symbol as token_a_symbol_full,
+    tb.symbol as token_b_symbol_full,
+    RANK() OVER (PARTITION BY o.chain ORDER BY o.profit_potential DESC) as profit_rank
+FROM opportunities o
+LEFT JOIN tokens ta ON o.token_a_address = ta.address AND o.chain = ta.chain
+LEFT JOIN tokens tb ON o.token_b_address = tb.address AND o.chain = tb.chain
+WHERE o.status = 'active' AND o.expires_at > NOW();
+
+-- Execution statistics
+CREATE VIEW v_execution_stats AS
+SELECT 
+    DATE(created_at) as date,
+    chain,
+    strategy_type,
+    COUNT(*) as total_executions,
+    COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_executions,
+    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_executions,
+    AVG(CASE WHEN status = 'completed' THEN profit_realized END) as avg_profit,
+    SUM(CASE WHEN status = 'completed' THEN profit_realized ELSE 0 END) as total_profit,
+    AVG(execution_time_ms) as avg_execution_time
+FROM executions
+GROUP BY DATE(created_at), chain, strategy_type;
+
+-- Top performing pairs
+CREATE VIEW v_top_pairs AS
+SELECT 
+    token_a_address,
+    token_b_address,
+    token_a_symbol,
+    token_b_symbol,
+    chain,
+    COUNT(*) as opportunity_count,
+    AVG(profit_percentage) as avg_profit_percentage,
+    SUM(CASE WHEN status = 'executed' THEN 1 ELSE 0 END) as executed_count
+FROM opportunities
+WHERE created_at >= NOW() - INTERVAL '7 days'
+GROUP BY token_a_address, token_b_address, token_a_symbol, token_b_symbol, chain
+ORDER BY opportunity_count DESC, avg_profit_percentage DESC;
+
+-- =====================================================
+-- STORED PROCEDURES
+-- =====================================================
+
+-- Clean up expired opportunities
 CREATE OR REPLACE FUNCTION cleanup_expired_opportunities()
 RETURNS INTEGER AS $$
 DECLARE
     deleted_count INTEGER;
 BEGIN
     DELETE FROM opportunities 
-    WHERE expires_at < NOW() AND status IN ('pending', 'analyzing');
+    WHERE status = 'active' AND expires_at < NOW() - INTERVAL '1 hour';
     
     GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    
+    INSERT INTO analytics (date, chain, total_opportunities) 
+    VALUES (CURRENT_DATE, 'ethereum', -deleted_count)
+    ON CONFLICT (date, chain) 
+    DO UPDATE SET total_opportunities = analytics.total_opportunities - deleted_count;
+    
     RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to calculate profit metrics
-CREATE OR REPLACE FUNCTION calculate_profit_metrics(
-    start_date TIMESTAMP WITH TIME ZONE DEFAULT NOW() - INTERVAL '24 hours',
-    end_date TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-)
-RETURNS TABLE(
-    total_profit_usd DECIMAL(20, 8),
-    total_gas_cost_usd DECIMAL(20, 8),
-    net_profit_usd DECIMAL(20, 8),
-    execution_count BIGINT,
-    success_rate DECIMAL(5, 4)
-) AS $$
+-- Update daily analytics
+CREATE OR REPLACE FUNCTION update_daily_analytics()
+RETURNS VOID AS $$
 BEGIN
-    RETURN QUERY
+    INSERT INTO analytics (
+        date, 
+        chain, 
+        total_opportunities, 
+        successful_executions, 
+        failed_executions,
+        total_volume,
+        total_profit,
+        total_gas_used,
+        average_profit_percentage,
+        success_rate
+    )
     SELECT 
-        COALESCE(SUM(e.profit_actual_usd), 0) as total_profit_usd,
-        COALESCE(SUM(e.gas_used * e.gas_price_actual_gwei / 1e9 * 2000), 0) as total_gas_cost_usd, -- Assuming $2000 ETH
-        COALESCE(SUM(e.profit_actual_usd), 0) - COALESCE(SUM(e.gas_used * e.gas_price_actual_gwei / 1e9 * 2000), 0) as net_profit_usd,
-        COUNT(*) as execution_count,
-        ROUND(COUNT(*) FILTER (WHERE e.status = 'confirmed')::DECIMAL / NULLIF(COUNT(*), 0), 4) as success_rate
-    FROM executions e
-    WHERE e.executed_at BETWEEN start_date AND end_date;
+        CURRENT_DATE,
+        o.chain,
+        COUNT(o.id),
+        COUNT(CASE WHEN e.status = 'completed' THEN 1 END),
+        COUNT(CASE WHEN e.status = 'failed' THEN 1 END),
+        COALESCE(SUM(CASE WHEN e.status = 'completed' THEN e.amount_in END), 0),
+        COALESCE(SUM(CASE WHEN e.status = 'completed' THEN e.profit_realized END), 0),
+        COALESCE(SUM(CASE WHEN e.status = 'completed' THEN e.gas_used END), 0),
+        AVG(o.profit_percentage),
+        CASE 
+            WHEN COUNT(e.id) > 0 THEN 
+                COUNT(CASE WHEN e.status = 'completed' THEN 1 END)::DECIMAL / COUNT(e.id)
+            ELSE 0 
+        END
+    FROM opportunities o
+    LEFT JOIN executions e ON o.id = e.opportunity_id
+    WHERE DATE(o.created_at) = CURRENT_DATE
+    GROUP BY o.chain
+    ON CONFLICT (date, chain) 
+    DO UPDATE SET
+        total_opportunities = EXCLUDED.total_opportunities,
+        successful_executions = EXCLUDED.successful_executions,
+        failed_executions = EXCLUDED.failed_executions,
+        total_volume = EXCLUDED.total_volume,
+        total_profit = EXCLUDED.total_profit,
+        total_gas_used = EXCLUDED.total_gas_used,
+        average_profit_percentage = EXCLUDED.average_profit_percentage,
+        success_rate = EXCLUDED.success_rate,
+        updated_at = NOW();
 END;
 $$ LANGUAGE plpgsql;
 
--- Views for common queries
-CREATE VIEW v_active_opportunities AS
-SELECT 
-    o.*,
-    CASE 
-        WHEN o.expires_at < NOW() THEN true 
-        ELSE false 
-    END as is_expired
-FROM opportunities o
-WHERE o.status IN ('pending', 'analyzing', 'selected')
-ORDER BY o.profit_usd DESC;
+-- =====================================================
+-- D1 MIGRATIONS (Edge/Cloudflare)
+-- Ubicación: d1/migrations/0001_initial_schema.sql
+-- =====================================================
 
-CREATE VIEW v_execution_summary AS
-SELECT 
-    e.*,
-    o.chain,
-    o.token_a,
-    o.token_b,
-    o.dex_a,
-    o.dex_b,
-    o.profit_usd as expected_profit_usd
-FROM executions e
-JOIN opportunities o ON e.opportunity_id = o.id
-ORDER BY e.executed_at DESC;
+-- D1 Schema (SQLite-compatible)
+CREATE TABLE IF NOT EXISTS opportunities_cache (
+    id TEXT PRIMARY KEY,
+    pair_address TEXT NOT NULL,
+    token_a_symbol TEXT NOT NULL,
+    token_b_symbol TEXT NOT NULL,
+    dex_a TEXT NOT NULL,
+    dex_b TEXT NOT NULL,
+    profit_potential REAL NOT NULL,
+    profit_percentage REAL NOT NULL,
+    chain TEXT NOT NULL,
+    status TEXT DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
 
-CREATE VIEW v_daily_metrics AS
-SELECT 
-    DATE(executed_at) as date,
-    COUNT(*) as total_executions,
-    COUNT(*) FILTER (WHERE status = 'confirmed') as successful_executions,
-    SUM(profit_actual_usd) FILTER (WHERE status = 'confirmed') as total_profit_usd,
-    AVG(profit_actual_usd) FILTER (WHERE status = 'confirmed') as avg_profit_usd,
-    SUM(gas_used * gas_price_actual_gwei / 1e9) FILTER (WHERE status = 'confirmed') as total_gas_cost_eth
-FROM executions
-WHERE executed_at >= NOW() - INTERVAL '30 days'
-GROUP BY DATE(executed_at)
-ORDER BY date DESC;
+CREATE TABLE IF NOT EXISTS executions_cache (
+    id TEXT PRIMARY KEY,
+    opportunity_id TEXT NOT NULL,
+    strategy_type TEXT NOT NULL,
+    amount_in REAL NOT NULL,
+    profit_realized REAL,
+    status TEXT DEFAULT 'pending',
+    chain TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (opportunity_id) REFERENCES opportunities_cache(id)
+);
 
--- Insert default configuration
-INSERT INTO configuration (config_key, config_value, description) VALUES
-('min_profit_usd', '10.0', 'Minimum profit threshold in USD for opportunity execution'),
-('max_gas_price_gwei', '100', 'Maximum gas price in Gwei for transaction submission'),
-('max_slippage_percent', '2.0', 'Maximum allowed slippage percentage'),
-('execution_timeout_seconds', '30', 'Timeout for execution operations'),
-('confirmation_blocks', '1', 'Number of blocks to wait for confirmation'),
-('retry_attempts', '3', 'Number of retry attempts for failed operations'),
-('rate_limit_per_minute', '100', 'Default rate limit per minute for API calls'),
-('session_timeout_hours', '24', 'Session timeout in hours'),
-('cleanup_interval_hours', '6', 'Interval for cleanup operations in hours'),
-('metrics_retention_days', '30', 'Number of days to retain metrics data');
+CREATE TABLE IF NOT EXISTS analytics_cache (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    chain TEXT NOT NULL,
+    total_opportunities INTEGER DEFAULT 0,
+    successful_executions INTEGER DEFAULT 0,
+    total_profit REAL DEFAULT 0,
+    success_rate REAL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    UNIQUE(date, chain)
+);
 
--- Grant permissions (adjust as needed for your setup)
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO arbitragex;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO arbitragex;
--- GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO arbitragex;
+CREATE TABLE IF NOT EXISTS rate_limits (
+    id TEXT PRIMARY KEY,
+    ip_address TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    request_count INTEGER DEFAULT 0,
+    window_start INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(ip_address, endpoint)
+);
 
--- Create a user for read-only access (monitoring, analytics)
--- CREATE USER arbitragex_readonly WITH PASSWORD 'readonly_password';
--- GRANT CONNECT ON DATABASE arbitragex_supreme TO arbitragex_readonly;
--- GRANT USAGE ON SCHEMA public TO arbitragex_readonly;
--- GRANT SELECT ON ALL TABLES IN SCHEMA public TO arbitragex_readonly;
+-- D1 Indexes
+CREATE INDEX IF NOT EXISTS idx_opportunities_cache_status ON opportunities_cache(status);
+CREATE INDEX IF NOT EXISTS idx_opportunities_cache_chain ON opportunities_cache(chain);
+CREATE INDEX IF NOT EXISTS idx_opportunities_cache_created_at ON opportunities_cache(created_at);
+CREATE INDEX IF NOT EXISTS idx_opportunities_cache_profit ON opportunities_cache(profit_potential);
 
-COMMENT ON DATABASE arbitragex_supreme IS 'ArbitrageX Supreme V3.0 - Main application database';
-COMMENT ON TABLE opportunities IS 'Detected arbitrage opportunities across different chains and DEXs';
-COMMENT ON TABLE executions IS 'Execution attempts for arbitrage opportunities';
-COMMENT ON TABLE reconciliation_records IS 'Reconciliation data for executed transactions';
-COMMENT ON TABLE bundle_submissions IS 'MEV bundle submissions to various relays';
-COMMENT ON TABLE system_metrics IS 'System performance and business metrics';
-COMMENT ON TABLE user_sessions IS 'Active user sessions for authentication';
-COMMENT ON TABLE api_keys IS 'API keys for external access';
-COMMENT ON TABLE configuration IS 'System configuration parameters';
-COMMENT ON TABLE audit_log IS 'Audit trail for all system changes';
+CREATE INDEX IF NOT EXISTS idx_executions_cache_opportunity_id ON executions_cache(opportunity_id);
+CREATE INDEX IF NOT EXISTS idx_executions_cache_status ON executions_cache(status);
+CREATE INDEX IF NOT EXISTS idx_executions_cache_chain ON executions_cache(chain);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_cache_date ON analytics_cache(date);
+CREATE INDEX IF NOT EXISTS idx_analytics_cache_chain ON analytics_cache(chain);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_ip ON rate_limits(ip_address);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON rate_limits(window_start);
+
+-- =====================================================
+-- MIGRATION SCRIPTS
+-- =====================================================
+
+-- PostgreSQL Migration Script
+-- Ubicación: scripts/migrate-postgres.sh
+/*
+#!/bin/bash
+set -e
+
+echo "🗄️ Running PostgreSQL migrations..."
+
+# Check if database exists
+if ! psql -lqt | cut -d \| -f 1 | grep -qw arbitragex_prod; then
+    echo "Creating database arbitragex_prod..."
+    createdb arbitragex_prod
+fi
+
+# Run migrations
+psql -d arbitragex_prod -f migrations/001_initial_schema.sql
+
+# Verify migration
+psql -d arbitragex_prod -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';"
+
+echo "✅ PostgreSQL migrations completed successfully!"
+*/
+
+-- D1 Migration Script
+-- Ubicación: scripts/migrate-d1.sh
+/*
+#!/bin/bash
+set -e
+
+echo "🗄️ Running D1 migrations..."
+
+# Apply migrations to staging
+wrangler d1 migrations apply arbitragex-db-staging --env staging
+
+# Apply migrations to production
+wrangler d1 migrations apply arbitragex-db-prod --env production
+
+# Verify migrations
+wrangler d1 execute arbitragex-db-prod --command="SELECT name FROM sqlite_master WHERE type='table';" --env production
+
+echo "✅ D1 migrations completed successfully!"
+*/
+
+-- =====================================================
+-- SEED DATA FOR TESTING
+-- =====================================================
+
+-- Insert default strategies
+INSERT INTO strategies (name, type, description, parameters, supported_chains) VALUES
+('Basic Arbitrage', 'arbitrage', 'Simple price difference arbitrage between DEXes', '{"min_profit_usd": 10}', ARRAY['ethereum', 'polygon']),
+('Flashloan Arbitrage', 'flashloan', 'Arbitrage using flashloans for larger capital', '{"min_profit_usd": 50, "max_loan_amount": 1000000}', ARRAY['ethereum', 'arbitrum']),
+('MEV Protection', 'mev', 'MEV-protected arbitrage execution', '{"use_private_mempool": true}', ARRAY['ethereum']),
+('Cross-chain Arbitrage', 'cross_chain', 'Arbitrage across different chains', '{"bridge_fee_threshold": 0.1}', ARRAY['ethereum', 'polygon', 'arbitrum']);
+
+-- Insert common tokens
+INSERT INTO tokens (address, symbol, name, decimals, chain, is_verified) VALUES
+('0xA0b86a33E6441b8435b662b0C0C39C1A5b0c5c3c', 'WETH', 'Wrapped Ether', 18, 'ethereum', true),
+('0x6B175474E89094C44Da98b954EedeAC495271d0F', 'DAI', 'Dai Stablecoin', 18, 'ethereum', true),
+('0xA0b86a33E6441b8435b662b0C0C39C1A5b0c5c3c', 'USDC', 'USD Coin', 6, 'ethereum', true),
+('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', 'WBTC', 'Wrapped Bitcoin', 8, 'ethereum', true);
+
+COMMIT;
