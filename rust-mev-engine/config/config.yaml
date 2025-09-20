@@ -1,0 +1,66 @@
+---
+# Configuración general
+app:
+  name: "arbitragex-mev-engine"
+  version: "0.1.0"
+  environment: "development" # development, production
+
+# Configuración del servidor
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4 # Número de worker threads
+  keep_alive: 75 # segundos
+  client_timeout: 60 # segundos
+  client_shutdown: 30 # segundos
+
+# Base de datos
+database:
+  url: "${DATABASE_URL:-postgres://arbitragex:securepwd123@localhost:5432/arbitragexdb}"
+  pool_size: 5
+  timeout: 30 # segundos
+  max_lifetime: 1800 # segundos
+
+# Redis
+redis:
+  url: "${REDIS_URL:-redis://:secureredis123@localhost:6379/0}"
+  pool_size: 5
+  retry_attempts: 3
+  retry_delay: 1 # segundos
+  expire_time: 3600 # segundos (caché TTL)
+
+# Blockchain
+blockchain:
+  verification_enabled: ${RPC_VERIFICATION_ENABLED:-true}
+  max_concurrent_connections: 20
+  request_timeout: 5 # segundos
+  rate_limit: 10 # req/s por blockchain
+  circuit_breaker:
+    threshold: 3
+    timeout: 30 # segundos
+    half_open_success: 2
+
+# Wallet (IMPORTANTE: No almacenar claves privadas reales aquí, usar variables de entorno)
+wallet:
+  use_hardware: ${USE_HARDWARE_WALLET:-false}
+  use_env_private_key: true
+  fallback_private_key: "" # Dejarlo vacío en producción, solo para desarrollo
+  gas_limit_multiplier: 1.2
+  max_priority_fee: "3000000000" # 3 gwei
+  max_fee: "50000000000" # 50 gwei
+
+# Monitoreo
+monitoring:
+  prometheus_enabled: true
+  prometheus_port: 9090
+  log_level: "${LOG_LEVEL:-info}"
+  health_check_interval: 60 # segundos
+
+# Arbitraje
+arbitrage:
+  min_profit_usd: 10.0 # Ganancia mínima en USD para considerar una oportunidad
+  profit_threshold_percentage: 0.5 # % mínimo de ganancia
+  max_slippage: 0.5 # % máximo de slippage permitido
+  opportunity_ttl: 60 # segundos
+  max_concurrent_simulations: 5
+  gas_price_buffer: 1.1 # Factor de multiplicación para el gas estimado

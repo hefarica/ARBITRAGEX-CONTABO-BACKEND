@@ -1,0 +1,41 @@
+﻿# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn.lock
+package-lock.json
+
+# Bases de datos
+/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ConfiguraciÃ³n
+.env
+.env.*
+!.env.example
+config.*.json
+!config.example.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Sistema
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Compilados
+dist/
+build/
