@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-# ArbitrageX Supreme v3.0 - Contabo VPS Backend
+# ArbitrageX Supreme v3.2 - Contabo VPS Backend
 
 ## Sistema MEV-Grade de Arbitraje DeFi - Backend Rust + Docker
 
